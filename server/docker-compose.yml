@@ -1,0 +1,83 @@
+# frodas server stack: mosquitto (MQTT) -> telegraf -> victoriametrics <- grafana
+#
+# Setup:  python3 ../tools/stack.py init   (generates .env + mosquitto passwd)
+# Run:    python3 ../tools/stack.py up     (or: docker compose up -d)
+# Check:  python3 ../tools/stack.py smoke
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test:
+        - CMD
+        - mosquitto_sub
+        - -t
+        - $$SYS/broker/uptime
+        - -C
+        - "1"
+        - -u
+        - ${MQTT_USER:?set in .env}
+        - -P
+        - ${MQTT_PASSWORD:?set in .env}
+        - -i
+        - healthcheck
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.106.1
+    restart: unless-stopped
+    command:
+      - -storageDataPath=/storage
+      - -retentionPeriod=2y
+      - -httpListenAddr=:8428
+    ports:
+      # Exposed for debugging / direct PromQL; remove if you don't want it.
+      - "8428:8428"
+    volumes:
+      - vm-data:/storage
+
+  telegraf:
+    image: telegraf:1.33
+    restart: unless-stopped
+    environment:
+      MQTT_USER: ${MQTT_USER:?set in .env}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?set in .env}
+    volumes:
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      victoriametrics:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana-oss:11.4.0
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      victoriametrics:
+        condition: service_started
+
+volumes:
+  mosquitto-data:
+  vm-data:
+  grafana-data:

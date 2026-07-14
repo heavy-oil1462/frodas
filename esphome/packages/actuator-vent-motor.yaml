@@ -1,0 +1,83 @@
+# =============================================================================
+# frodas — packages/actuator-vent-motor.yaml
+# -----------------------------------------------------------------------------
+# Motorised roof vent / window opener on an H-bridge, modelled as a time-based
+# cover (no endstops assumed — travel is time-limited). Direction pins are
+# hardware-interlocked in software so both can never be driven at once.
+#
+# The vent holds position with zero power; only movement costs energy, so
+# load shedding stops *movement* (tier ≥ 2) rather than forcing a position.
+#
+# Cover commands over MQTT are NOT retained (replay hazard). To force the
+# vent position while the device sleeps, use the retained "Ventilation Mode"
+# select from automation-ventilation.yaml.
+#
+# Substitutions:
+#   vent_id         Cover id (default: vent).
+#                   Referenced by automation-ventilation.yaml.
+#   vent_name       Friendly name (default: Roof Vent)
+#   vent_open_pin   H-bridge input, open direction  (default: GPIO32)
+#   vent_close_pin  H-bridge input, close direction (default: GPIO33)
+#   vent_travel_s   Full-travel time in seconds (default: 30)
+#
+# Provides:
+#   cover id ${vent_id}
+# =============================================================================
+
+substitutions:
+  vent_id: vent
+  vent_name: Roof Vent
+  vent_open_pin: GPIO32
+  vent_close_pin: GPIO33
+  vent_travel_s: "30"
+
+switch:
+  - platform: gpio
+    pin: ${vent_open_pin}
+    id: ${vent_id}_open_sw
+    internal: true
+    restore_mode: ALWAYS_OFF
+    interlock:
+      - ${vent_id}_open_sw
+      - ${vent_id}_close_sw
+    interlock_wait_time: 300ms
+  - platform: gpio
+    pin: ${vent_close_pin}
+    id: ${vent_id}_close_sw
+    internal: true
+    restore_mode: ALWAYS_OFF
+    interlock:
+      - ${vent_id}_open_sw
+      - ${vent_id}_close_sw
+    interlock_wait_time: 300ms
+
+cover:
+  - platform: time_based
+    id: ${vent_id}
+    name: ${vent_name}
+    device_class: window
+    has_built_in_endstop: false
+    open_action:
+      - switch.turn_on: ${vent_id}_open_sw
+    open_duration: ${vent_travel_s}s
+    close_action:
+      - switch.turn_on: ${vent_id}_close_sw
+    close_duration: ${vent_travel_s}s
+    stop_action:
+      - switch.turn_off: ${vent_id}_open_sw
+      - switch.turn_off: ${vent_id}_close_sw
+
+interval:
+  # Load shedding: stop driving the motor at tier ≥ 2 (position holds free).
+  - interval: 30s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(load_shed_tier) >= 2 &&
+                     id(${vent_id}).current_operation != esphome::cover::COVER_OPERATION_IDLE;
+          then:
+            - logger.log:
+                level: WARN
+                format: "load-shed tier >= 2: stopping vent motor"
+            - cover.stop: ${vent_id}

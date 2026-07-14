@@ -1,0 +1,223 @@
+# =============================================================================
+# frodas — packages/automation-watering.yaml
+# -----------------------------------------------------------------------------
+# Local watering control loop. Runs entirely on the ESP32; WiFi/MQTT/HA can
+# all be down and this still works. Opens the watering actuator in pulses of
+# ${watering_pulse_s} followed by a soak period, when ALL of these hold:
+#
+#   * "Watering Enabled" switch is on
+#   * load-shed tier <= 2  (watering is the last load to be shed)
+#   * wall-clock time is valid (synced at least once since power-on) —
+#     without a clock the schedule window can't be honored, so FAIL SAFE:
+#     no watering
+#   * local time inside [Window Start, Window End) hours
+#   * soil moisture below "Soil Threshold" (NaN = sensor fault = no watering)
+#   * open-seconds used today + one pulse <= "Max Daily" hard cap
+#
+# The daily budget accumulates while the actuator is ON (whoever turned it
+# on, including manual HA control), persists across reboots, and resets at
+# local midnight. Independent force-close gates run every tick.
+#
+# All runtime setpoints are ESPHome number/switch entities: editable from HA
+# via retained MQTT commands (applied at the next radio window), persisted in
+# flash, and enforced locally.
+#
+# Requires:
+#   * a moisture sensor id ${watering_soil_sensor} (%, 0–100) —
+#     default matches sensor-soil-capacitive.yaml
+#   * a switch id ${watering_valve} — default matches
+#     actuator-latching-valve.yaml; point it at a pump switch if your
+#     circuit is pump-driven
+#
+# Substitutions:
+#   watering_soil_sensor             (default: soil_moisture)
+#   watering_valve                   (default: irrigation_valve)
+#   watering_default_threshold_pct   Initial soil threshold (default: 35)
+#   watering_default_window_start_h  Initial window start hour (default: 6)
+#   watering_default_window_end_h    Initial window end hour (default: 9)
+#   watering_default_max_daily_s     Initial daily cap in seconds (default: 600)
+#   watering_pulse_s                 Valve-open seconds per pulse (default: 120)
+#   watering_soak_s                  Min seconds between pulses (default: 1800)
+#   watering_check_interval_s        Control-loop tick (default: 60)
+# =============================================================================
+
+substitutions:
+  watering_soil_sensor: soil_moisture
+  watering_valve: irrigation_valve
+  watering_default_threshold_pct: "35"
+  watering_default_window_start_h: "6"
+  watering_default_window_end_h: "9"
+  watering_default_max_daily_s: "600"
+  watering_pulse_s: "120"
+  watering_soak_s: "1800"
+  watering_check_interval_s: "60"
+
+globals:
+  - id: watering_open_s_today
+    type: float
+    restore_value: true
+    initial_value: "0"
+  - id: watering_last_day
+    type: int
+    restore_value: true
+    initial_value: "-1"
+  - id: watering_last_pulse_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+
+switch:
+  - platform: template
+    id: watering_enabled
+    name: Watering Enabled
+    icon: mdi:sprinkler-variant
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+    command_retain: true
+
+number:
+  - platform: template
+    id: watering_soil_threshold
+    name: Watering Soil Threshold
+    unit_of_measurement: "%"
+    icon: mdi:water-percent-alert
+    min_value: 0
+    max_value: 100
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: ${watering_default_threshold_pct}
+    entity_category: config
+    command_retain: true
+  - platform: template
+    id: watering_window_start
+    name: Watering Window Start Hour
+    unit_of_measurement: h
+    icon: mdi:clock-start
+    min_value: 0
+    max_value: 23
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: ${watering_default_window_start_h}
+    entity_category: config
+    command_retain: true
+  - platform: template
+    id: watering_window_end
+    name: Watering Window End Hour
+    unit_of_measurement: h
+    icon: mdi:clock-end
+    min_value: 0
+    max_value: 23
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: ${watering_default_window_end_h}
+    entity_category: config
+    command_retain: true
+  - platform: template
+    id: watering_max_daily_s
+    name: Watering Max Daily Seconds
+    unit_of_measurement: s
+    icon: mdi:timer-lock
+    min_value: 0
+    max_value: 7200
+    step: 30
+    optimistic: true
+    restore_value: true
+    initial_value: ${watering_default_max_daily_s}
+    entity_category: config
+    command_retain: true
+
+sensor:
+  - platform: template
+    id: watering_used_today
+    name: Watering Used Today
+    unit_of_measurement: s
+    icon: mdi:cup-water
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: 'return id(watering_open_s_today);'
+
+script:
+  # One watering pulse: open, wait, close. The daily budget is accumulated by
+  # the control-loop tick (not here) so aborted pulses are counted too.
+  - id: watering_pulse
+    mode: single
+    then:
+      - lambda: 'id(watering_last_pulse_ms) = millis();'
+      - switch.turn_on: ${watering_valve}
+      - delay: ${watering_pulse_s}s
+      - switch.turn_off: ${watering_valve}
+      - lambda: 'id(watering_last_pulse_ms) = millis();'
+
+interval:
+  - interval: ${watering_check_interval_s}s
+    then:
+      - lambda: |-
+          const bool valve_on = id(${watering_valve}).state;
+
+          // Budget accounting: count every second the actuator is on,
+          // regardless of who turned it on.
+          if (valve_on)
+            id(watering_open_s_today) += ${watering_check_interval_s};
+
+          // Helper: force everything closed.
+          const auto force_close = [&]() {
+            if (id(watering_pulse).is_running())
+              id(watering_pulse).stop();
+            if (id(${watering_valve}).state)
+              id(${watering_valve}).turn_off();
+          };
+
+          // Hard gates — evaluated every tick, each one closes the valve.
+          if (id(load_shed_tier) >= 3 || !id(watering_enabled).state) {
+            force_close();
+            return;
+          }
+
+          const auto now = id(net_time).now();
+          if (!now.is_valid()) {
+            // No wall clock since power-on: fail safe, never water.
+            force_close();
+            return;
+          }
+
+          // Daily budget reset at local midnight.
+          if (now.day_of_year != id(watering_last_day)) {
+            id(watering_last_day) = now.day_of_year;
+            id(watering_open_s_today) = 0;
+          }
+
+          if (id(watering_open_s_today) >= id(watering_max_daily_s).state) {
+            force_close();
+            return;
+          }
+
+          const int start_h = (int) id(watering_window_start).state;
+          const int end_h = (int) id(watering_window_end).state;
+          const int h = now.hour;
+          const bool in_window = (start_h <= end_h)
+              ? (h >= start_h && h < end_h)
+              : (h >= start_h || h < end_h);  // window crossing midnight
+          if (!in_window) {
+            force_close();
+            return;
+          }
+
+          // Decision gates — no forced close, just "not now".
+          if (valve_on || id(watering_pulse).is_running())
+            return;  // pulse in progress
+          const float soil = id(${watering_soil_sensor}).state;
+          if (std::isnan(soil) || soil >= id(watering_soil_threshold).state)
+            return;  // sensor fault (fail safe) or moist enough
+          const uint32_t last = id(watering_last_pulse_ms);
+          if (last != 0 && millis() - last < (uint32_t) ${watering_soak_s} * 1000UL)
+            return;  // soaking
+          if (id(watering_open_s_today) + ${watering_pulse_s} >
+              id(watering_max_daily_s).state)
+            return;  // pulse would blow the daily cap
+
+          id(watering_pulse).execute();

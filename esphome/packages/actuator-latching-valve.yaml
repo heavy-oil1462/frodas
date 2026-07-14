@@ -1,0 +1,76 @@
+# =============================================================================
+# frodas — packages/actuator-latching-valve.yaml
+# -----------------------------------------------------------------------------
+# Bistable (latching) irrigation valve driven by an H-bridge (DRV8871, L298N,
+# …). Latching valves hold their position with zero power; open/close is a
+# short polarity pulse. Ideal for the solar power budget.
+#
+# The switch is stateful: ESPHome remembers the last commanded position in
+# flash. On boot it re-drives a CLOSE pulse (restore_mode RESTORE_DEFAULT_OFF)
+# so software state and hardware state are guaranteed to agree — fail closed.
+#
+# Safety, local and independent of any automation package:
+#   * open/close outputs are pulsed sequentially, never held
+#   * a 30 s watchdog force-closes the valve at load-shed tier 3
+#
+# The MQTT command for this switch is intentionally NOT retained: a retained
+# ON replayed at the next radio window could water hours after you clicked.
+# Sleeping-safe control belongs to setpoints (automation-watering.yaml).
+#
+# Substitutions:
+#   valve_id         Switch id (default: irrigation_valve).
+#                    Referenced by automation-watering.yaml.
+#   valve_name       Friendly name (default: Irrigation Valve)
+#   valve_open_pin   H-bridge input for the OPEN pulse  (default: GPIO25)
+#   valve_close_pin  H-bridge input for the CLOSE pulse (default: GPIO26)
+#   valve_pulse_ms   Pulse length in ms (default: 100)
+#
+# Provides:
+#   switch id ${valve_id} (ON = open, OFF = closed)
+# =============================================================================
+
+substitutions:
+  valve_id: irrigation_valve
+  valve_name: Irrigation Valve
+  valve_open_pin: GPIO25
+  valve_close_pin: GPIO26
+  valve_pulse_ms: "100"
+
+output:
+  - platform: gpio
+    pin: ${valve_open_pin}
+    id: ${valve_id}_open_out
+  - platform: gpio
+    pin: ${valve_close_pin}
+    id: ${valve_id}_close_out
+
+switch:
+  - platform: template
+    id: ${valve_id}
+    name: ${valve_name}
+    icon: mdi:pipe-valve
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - output.turn_off: ${valve_id}_close_out
+      - output.turn_on: ${valve_id}_open_out
+      - delay: ${valve_pulse_ms}ms
+      - output.turn_off: ${valve_id}_open_out
+    turn_off_action:
+      - output.turn_off: ${valve_id}_open_out
+      - output.turn_on: ${valve_id}_close_out
+      - delay: ${valve_pulse_ms}ms
+      - output.turn_off: ${valve_id}_close_out
+
+interval:
+  # Local hard stop: whatever commanded the valve, tier 3 closes it.
+  - interval: 30s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(load_shed_tier) >= 3 && id(${valve_id}).state;'
+          then:
+            - logger.log:
+                level: WARN
+                format: "load-shed tier 3: force-closing valve"
+            - switch.turn_off: ${valve_id}

@@ -1,0 +1,52 @@
+# =============================================================================
+# frodas — example-greenhouse.yaml
+# -----------------------------------------------------------------------------
+# Reference node: composes the base with every stock package. Copy this file,
+# keep the packages you have hardware for, delete the rest, and override
+# substitutions to match your wiring and climate. Core logic is never edited —
+# packages + substitutions are the extension mechanism (docs/EXTENDING.md).
+#
+# Build:   esphome compile esphome/example-greenhouse.yaml
+# Flash:   esphome run esphome/example-greenhouse.yaml
+# =============================================================================
+
+substitutions:
+  node_name: frodas-greenhouse
+  friendly_name: Frodas Greenhouse
+  timezone: Europe/Stockholm
+
+  # Radio duty cycle: 10 min cadence, ~45 s awake per window worst case.
+  telemetry_interval_min: "10"
+
+  # Soil probe calibration (see docs/HARDWARE.md for the procedure).
+  soil_raw_dry_v: "2.80"
+  soil_raw_wet_v: "1.30"
+
+  # 100k:20k divider on the battery sense pin.
+  battery_divider_ratio: "6.0"
+
+  # Watering: mornings, 2 min pulses, 30 min soak, max 10 min/day.
+  watering_default_window_start_h: "6"
+  watering_default_window_end_h: "9"
+  watering_pulse_s: "120"
+  watering_soak_s: "1800"
+  watering_default_max_daily_s: "600"
+
+  # LiFePO4 load-shed tiers.
+  loadshed_tier1_v: "12.8"
+  loadshed_tier2_v: "12.4"
+  loadshed_tier3_v: "12.0"
+
+packages:
+  base: !include greenhouse-base.yaml
+  i2c: !include packages/bus-i2c.yaml
+  climate: !include packages/sensor-sht3x.yaml
+  soil: !include packages/sensor-soil-capacitive.yaml
+  light: !include packages/sensor-light-bh1750.yaml
+  battery: !include packages/sensor-battery.yaml
+  valve: !include packages/actuator-latching-valve.yaml
+  pump: !include packages/actuator-pump-12v.yaml
+  vent_motor: !include packages/actuator-vent-motor.yaml
+  watering: !include packages/automation-watering.yaml
+  ventilation: !include packages/automation-ventilation.yaml
+  load_shedding: !include packages/automation-load-shedding.yaml

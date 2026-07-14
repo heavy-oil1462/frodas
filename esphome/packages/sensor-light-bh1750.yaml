@@ -1,0 +1,28 @@
+# =============================================================================
+# frodas — packages/sensor-light-bh1750.yaml
+# -----------------------------------------------------------------------------
+# BH1750 ambient-light sensor (I²C).
+# Requires: packages/bus-i2c.yaml (bus id `bus_a`).
+#
+# Substitutions:
+#   bh1750_address          I²C address (default: 0x23; ADDR high: 0x5C)
+#   bh1750_update_interval  Sample rate (default: 60s)
+#   bh1750_id               Sensor id (default: greenhouse_illuminance)
+#
+# Provides:
+#   sensor id ${bh1750_id} (lx)
+# =============================================================================
+
+substitutions:
+  bh1750_address: "0x23"
+  bh1750_update_interval: 60s
+  bh1750_id: greenhouse_illuminance
+
+sensor:
+  - platform: bh1750
+    i2c_id: bus_a
+    address: ${bh1750_address}
+    update_interval: ${bh1750_update_interval}
+    name: Greenhouse Illuminance
+    id: ${bh1750_id}
+    accuracy_decimals: 0

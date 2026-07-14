@@ -1,0 +1,167 @@
+# =============================================================================
+# frodas — packages/automation-ventilation.yaml
+# -----------------------------------------------------------------------------
+# Local ventilation control loop with hysteresis. Opens the vent when the
+# greenhouse is too hot or too humid, closes it when both are comfortably
+# back in range. Hysteresis comes from separate open/close setpoints — keep
+# a sensible gap (default 28 °C open / 24 °C close) to avoid motor hunting.
+#
+# "Ventilation Mode" select:
+#   Auto         — thermostat/hygrostat behaviour (default)
+#   Force open   — hold vent open  (retained: applies even if set while the
+#   Force closed — hold vent closed  device radio was off)
+#
+# Load shedding: no vent movement at tier ≥ 2 (position holds for free;
+# moving the motor costs energy). The vent motor package independently stops
+# in-flight movement.
+#
+# Requires:
+#   * temperature sensor id ${vent_temp_sensor} (°C) — default matches
+#     sensor-sht3x.yaml
+#   * humidity sensor id ${vent_rh_sensor} (%) — default matches
+#     sensor-sht3x.yaml
+#   * cover id ${vent_cover} — default matches actuator-vent-motor.yaml
+#
+# Substitutions:
+#   vent_temp_sensor            (default: greenhouse_temperature)
+#   vent_rh_sensor              (default: greenhouse_humidity)
+#   vent_cover                  (default: vent)
+#   vent_default_open_temp_c    Initial open-above temperature (default: 28)
+#   vent_default_close_temp_c   Initial close-below temperature (default: 24)
+#   vent_default_open_rh_pct    Initial open-above humidity (default: 85)
+#   vent_default_close_rh_pct   Initial close-below humidity (default: 70)
+#   vent_check_interval_s       Control-loop tick (default: 60)
+# =============================================================================
+
+substitutions:
+  vent_temp_sensor: greenhouse_temperature
+  vent_rh_sensor: greenhouse_humidity
+  vent_cover: vent
+  vent_default_open_temp_c: "28"
+  vent_default_close_temp_c: "24"
+  vent_default_open_rh_pct: "85"
+  vent_default_close_rh_pct: "70"
+  vent_check_interval_s: "60"
+
+select:
+  - platform: template
+    id: vent_mode
+    name: Ventilation Mode
+    icon: mdi:window-open-variant
+    options:
+      - Auto
+      - Force open
+      - Force closed
+    initial_option: Auto
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    command_retain: true
+
+number:
+  - platform: template
+    id: vent_open_temp
+    name: Vent Open Above Temperature
+    unit_of_measurement: °C
+    icon: mdi:thermometer-chevron-up
+    min_value: 0
+    max_value: 50
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: ${vent_default_open_temp_c}
+    entity_category: config
+    command_retain: true
+  - platform: template
+    id: vent_close_temp
+    name: Vent Close Below Temperature
+    unit_of_measurement: °C
+    icon: mdi:thermometer-chevron-down
+    min_value: 0
+    max_value: 50
+    step: 0.5
+    optimistic: true
+    restore_value: true
+    initial_value: ${vent_default_close_temp_c}
+    entity_category: config
+    command_retain: true
+  - platform: template
+    id: vent_open_rh
+    name: Vent Open Above Humidity
+    unit_of_measurement: "%"
+    icon: mdi:water-percent
+    min_value: 0
+    max_value: 100
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: ${vent_default_open_rh_pct}
+    entity_category: config
+    command_retain: true
+  - platform: template
+    id: vent_close_rh
+    name: Vent Close Below Humidity
+    unit_of_measurement: "%"
+    icon: mdi:water-percent
+    min_value: 0
+    max_value: 100
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: ${vent_default_close_rh_pct}
+    entity_category: config
+    command_retain: true
+
+interval:
+  - interval: ${vent_check_interval_s}s
+    then:
+      - lambda: |-
+          // Tier ≥ 2: hold position, never start the motor.
+          if (id(load_shed_tier) >= 2)
+            return;
+          // Don't issue a new command while the vent is moving.
+          if (id(${vent_cover}).current_operation !=
+              esphome::cover::COVER_OPERATION_IDLE)
+            return;
+
+          const float pos = id(${vent_cover}).position;
+          const auto open_vent = [&]() {
+            if (pos < 1.0f) {
+              auto call = id(${vent_cover}).make_call();
+              call.set_command_open();
+              call.perform();
+            }
+          };
+          const auto close_vent = [&]() {
+            if (pos > 0.0f) {
+              auto call = id(${vent_cover}).make_call();
+              call.set_command_close();
+              call.perform();
+            }
+          };
+
+          const std::string mode = id(vent_mode).state;
+          if (mode == "Force open") {
+            open_vent();
+            return;
+          }
+          if (mode == "Force closed") {
+            close_vent();
+            return;
+          }
+
+          const float t = id(${vent_temp_sensor}).state;
+          const float rh = id(${vent_rh_sensor}).state;
+          if (std::isnan(t))
+            return;  // sensor fault: hold position
+
+          const bool too_hot = t >= id(vent_open_temp).state;
+          const bool too_humid = !std::isnan(rh) && rh >= id(vent_open_rh).state;
+          const bool cool_enough = t <= id(vent_close_temp).state;
+          const bool dry_enough = std::isnan(rh) || rh <= id(vent_close_rh).state;
+
+          if (too_hot || too_humid)
+            open_vent();
+          else if (cool_enough && dry_enough)
+            close_vent();
+          // between thresholds: hysteresis band, hold position

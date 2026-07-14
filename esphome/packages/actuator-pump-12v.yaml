@@ -1,0 +1,74 @@
+# =============================================================================
+# frodas — packages/actuator-pump-12v.yaml
+# -----------------------------------------------------------------------------
+# 12 V pump on a relay or logic-level MOSFET (low side). Unlike the latching
+# valve this load draws power while ON, so it carries a hard max-runtime
+# watchdog that runs locally on the device: if anything — HA, an automation,
+# a human — leaves the pump on, it is forced off after ${pump_max_runtime_s}.
+#
+# Refuses to start at load-shed tier 3, and is force-stopped within 30 s if
+# tier 3 is entered while running.
+#
+# The MQTT command for this switch is intentionally NOT retained (same
+# replay hazard as the valve — see actuator-latching-valve.yaml).
+#
+# Substitutions:
+#   pump_id             Switch id (default: water_pump). Can be used as
+#                       `watering_valve` in automation-watering.yaml if your
+#                       watering circuit is pump-driven instead of valve-fed.
+#   pump_name           Friendly name (default: Water Pump)
+#   pump_pin            MOSFET/relay gate pin (default: GPIO27)
+#   pump_max_runtime_s  Hard runtime cap per activation (default: 300)
+#
+# Provides:
+#   switch id ${pump_id}
+# =============================================================================
+
+substitutions:
+  pump_id: water_pump
+  pump_name: Water Pump
+  pump_pin: GPIO27
+  pump_max_runtime_s: "300"
+
+switch:
+  - platform: gpio
+    pin: ${pump_pin}
+    id: ${pump_id}
+    name: ${pump_name}
+    icon: mdi:water-pump
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      - if:
+          condition:
+            lambda: 'return id(load_shed_tier) >= 3;'
+          then:
+            - logger.log:
+                level: WARN
+                format: "load-shed tier 3: refusing to start pump"
+            - switch.turn_off: ${pump_id}
+          else:
+            - script.execute: ${pump_id}_watchdog
+    on_turn_off:
+      - script.stop: ${pump_id}_watchdog
+
+script:
+  - id: ${pump_id}_watchdog
+    mode: restart
+    then:
+      - delay: ${pump_max_runtime_s}s
+      - logger.log:
+          level: WARN
+          format: "pump watchdog: max runtime reached, forcing off"
+      - switch.turn_off: ${pump_id}
+
+interval:
+  - interval: 30s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(load_shed_tier) >= 3 && id(${pump_id}).state;'
+          then:
+            - logger.log:
+                level: WARN
+                format: "load-shed tier 3: force-stopping pump"
+            - switch.turn_off: ${pump_id}

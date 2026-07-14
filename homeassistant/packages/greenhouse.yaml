@@ -1,0 +1,150 @@
+# =============================================================================
+# frodas — Home Assistant package
+# -----------------------------------------------------------------------------
+# Drop into <config>/packages/ (enable packages in configuration.yaml:
+#   homeassistant:
+#     packages: !include_dir_named packages
+# ) and import homeassistant/blueprints/automation/frodas/ as blueprints.
+#
+# All device entities are auto-created by MQTT discovery — this package only
+# ADDS value on top: a radio-window binary sensor, derived template sensors,
+# staleness detection, and alerts.
+#
+# ENTITY IDS: discovery derives ids from the node/friendly name. This file
+# assumes node_name "frodas-greenhouse" (entity ids like
+# sensor.frodas_greenhouse_battery_voltage). If you renamed the node, check
+# Developer Tools -> States and adjust.
+#
+# IMPORTANT (docs/PROTOCOL.md): entities do NOT go "unavailable" while the
+# greenhouse radio sleeps — they keep their retained state. Setpoint edits
+# made in HA are retained by the broker and applied at the next radio window
+# (<= 10 min normally, <= 60 min in deep load-shed). "Offline" therefore
+# means: no radio window for much longer than the beacon interval.
+# =============================================================================
+
+mqtt:
+  binary_sensor:
+    # Live view of the radio duty cycle (the device's LWT topic).
+    - name: Frodas radio window
+      unique_id: frodas_radio_window
+      state_topic: frodas/frodas-greenhouse/status
+      payload_on: "online"
+      payload_off: "offline"
+      device_class: connectivity
+      icon: mdi:wifi-sync
+
+template:
+  - sensor:
+      # Dew point via Magnus formula — condensation/mould risk indicator.
+      - name: Frodas dew point
+        unique_id: frodas_dew_point
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: >-
+          {% set t = states('sensor.frodas_greenhouse_greenhouse_temperature') | float(none) %}
+          {% set rh = states('sensor.frodas_greenhouse_greenhouse_humidity') | float(none) %}
+          {% if t is not none and rh is not none and rh > 0 %}
+            {% set gamma = (17.62 * t / (243.12 + t)) + log(rh / 100) %}
+            {{ (243.12 * gamma / (17.62 - gamma)) | round(1) }}
+          {% else %}
+            unknown
+          {% endif %}
+
+      # Rough LiFePO4 state-of-charge estimate from resting voltage.
+      # Coarse by nature (the LiFePO4 curve is flat) — trend, not gauge.
+      - name: Frodas battery SoC estimate
+        unique_id: frodas_battery_soc
+        unit_of_measurement: "%"
+        state_class: measurement
+        state: >-
+          {% set v = states('sensor.frodas_greenhouse_battery_voltage') | float(none) %}
+          {% if v is none %}
+            unknown
+          {% else %}
+            {% set curve = [(12.0, 0), (12.8, 10), (12.9, 20), (13.0, 30),
+                            (13.1, 40), (13.2, 70), (13.3, 90), (13.4, 99),
+                            (13.6, 100)] %}
+            {% set ns = namespace(soc=100) %}
+            {% if v <= curve[0][0] %}
+              {% set ns.soc = 0 %}
+            {% else %}
+              {% for i in range(1, curve | length) %}
+                {% if v <= curve[i][0] and v > curve[i-1][0] %}
+                  {% set lo = curve[i-1] %}
+                  {% set hi = curve[i] %}
+                  {% set ns.soc = lo[1] + (hi[1] - lo[1]) * (v - lo[0]) / (hi[0] - lo[0]) %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+            {{ ns.soc | round(0) }}
+          {% endif %}
+
+  - binary_sensor:
+      # Frost risk: greenhouse close to freezing.
+      - name: Frodas frost risk
+        unique_id: frodas_frost_risk
+        device_class: cold
+        state: >-
+          {{ states('sensor.frodas_greenhouse_greenhouse_temperature') | float(99) < 3.0 }}
+
+  # Staleness: uptime is published on every radio window and always changes,
+  # so its last_updated is the device's true "last seen". The trigger makes
+  # this re-evaluate every 5 minutes.
+  - trigger:
+      - platform: time_pattern
+        minutes: "/5"
+    binary_sensor:
+      - name: Frodas telemetry stale
+        unique_id: frodas_telemetry_stale
+        device_class: problem
+        state: >-
+          {% set last = states.sensor.frodas_greenhouse_uptime.last_updated
+             if states.sensor.frodas_greenhouse_uptime else none %}
+          {{ last is none or (now() - last).total_seconds() > 5400 }}
+
+automation:
+  - alias: "Frodas: low battery alert"
+    id: frodas_low_battery_alert
+    use_blueprint:
+      path: frodas/numeric_below_alert.yaml
+      input:
+        entity: sensor.frodas_greenhouse_battery_voltage
+        below: 12.4
+        for_minutes: 10
+        title: "Frodas: low battery"
+        message: >-
+          Greenhouse battery is low — load shedding is active.
+          Watering still runs; ventilation is curtailed.
+        notify_service: notify.notify
+
+  - alias: "Frodas: frost risk alert"
+    id: frodas_frost_risk_alert
+    use_blueprint:
+      path: frodas/numeric_below_alert.yaml
+      input:
+        entity: sensor.frodas_greenhouse_greenhouse_temperature
+        below: 3
+        for_minutes: 5
+        title: "Frodas: frost risk"
+        message: "Greenhouse temperature approaching freezing — protect the plants."
+        notify_service: notify.notify
+
+  - alias: "Frodas: greenhouse offline alert"
+    id: frodas_offline_alert
+    mode: single
+    trigger:
+      # 90 min = 1.5x the tier-3 hourly beacon; any live node beats that.
+      - platform: state
+        entity_id: binary_sensor.frodas_telemetry_stale
+        to: "on"
+        for:
+          minutes: 5
+    action:
+      - service: notify.notify
+        data:
+          title: "Frodas: greenhouse offline"
+          message: >-
+            No telemetry for over 90 minutes — the node missed even the
+            tier-3 beacon. Check power and WiFi. The greenhouse keeps
+            controlling itself locally, but you are flying blind.

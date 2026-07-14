@@ -1,0 +1,28 @@
+# =============================================================================
+# frodas — packages/bus-i2c.yaml
+# -----------------------------------------------------------------------------
+# Shared I²C bus. Include this ONCE if any of your sensor packages need I²C
+# (sensor-sht3x, sensor-light-bh1750, the INA219 in sensor-battery).
+# It is a separate package so that composing multiple I²C sensors never
+# declares the bus twice.
+#
+# Substitutions:
+#   i2c_sda        SDA pin (default: GPIO21)
+#   i2c_scl        SCL pin (default: GPIO22)
+#   i2c_frequency  Bus frequency (default: 100kHz)
+#
+# Provides:
+#   i2c bus id `bus_a` — referenced by every frodas I²C sensor package.
+# =============================================================================
+
+substitutions:
+  i2c_sda: GPIO21
+  i2c_scl: GPIO22
+  i2c_frequency: 100kHz
+
+i2c:
+  - id: bus_a
+    sda: ${i2c_sda}
+    scl: ${i2c_scl}
+    frequency: ${i2c_frequency}
+    scan: true

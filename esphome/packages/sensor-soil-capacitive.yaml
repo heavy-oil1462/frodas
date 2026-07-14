@@ -1,0 +1,59 @@
+# =============================================================================
+# frodas — packages/sensor-soil-capacitive.yaml
+# -----------------------------------------------------------------------------
+# Capacitive soil-moisture probe (e.g. "Capacitive Soil Moisture Sensor v1.2")
+# on an ESP32 ADC1 pin. ADC2 pins cannot be used — they conflict with WiFi.
+#
+# Calibration: watch "Soil Moisture Raw Voltage" (diagnostic entity) with the
+# probe in dry air and again in a glass of water, then set soil_raw_dry_v /
+# soil_raw_wet_v accordingly. See docs/HARDWARE.md.
+#
+# Substitutions:
+#   soil_adc_pin           ADC1 pin (default: GPIO34, input-only)
+#   soil_update_interval   Sample rate (default: 30s)
+#   soil_raw_dry_v         Probe voltage in dry air  -> 0 %   (default: 2.80)
+#   soil_raw_wet_v         Probe voltage in water    -> 100 % (default: 1.30)
+#   soil_sensor_id         Sensor id (default: soil_moisture).
+#                          Referenced by automation-watering.yaml.
+#
+# Provides:
+#   sensor id ${soil_sensor_id} (%, 0 = bone dry, 100 = saturated)
+#   sensor id ${soil_sensor_id}_raw (V, diagnostic, for calibration)
+# =============================================================================
+
+substitutions:
+  soil_adc_pin: GPIO34
+  soil_update_interval: 30s
+  soil_raw_dry_v: "2.80"
+  soil_raw_wet_v: "1.30"
+  soil_sensor_id: soil_moisture
+
+sensor:
+  - platform: adc
+    pin: ${soil_adc_pin}
+    id: ${soil_sensor_id}_raw
+    name: Soil Moisture Raw Voltage
+    attenuation: 12db
+    update_interval: ${soil_update_interval}
+    accuracy_decimals: 3
+    entity_category: diagnostic
+    filters:
+      - median:
+          window_size: 7
+          send_every: 1
+          send_first_at: 1
+
+  - platform: copy
+    source_id: ${soil_sensor_id}_raw
+    id: ${soil_sensor_id}
+    name: Soil Moisture
+    unit_of_measurement: "%"
+    icon: mdi:water-percent
+    accuracy_decimals: 0
+    filters:
+      - calibrate_linear:
+          - ${soil_raw_dry_v} -> 0.0
+          - ${soil_raw_wet_v} -> 100.0
+      - clamp:
+          min_value: 0
+          max_value: 100

@@ -1,0 +1,17 @@
+# secrets / local state
+esphome/secrets.yaml
+esphome/.esphome/
+.esphome/
+server/.env
+server/mosquitto/passwd
+
+# build / dev artifacts
+.venv/
+result
+result-*
+__pycache__/
+*.pyc
+.direnv/
+
+# local claude settings
+.claude/settings.local.json*

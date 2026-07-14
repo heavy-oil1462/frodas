@@ -1,0 +1,104 @@
+# =============================================================================
+# frodas — packages/automation-load-shedding.yaml
+# -----------------------------------------------------------------------------
+# Battery-voltage-driven load shedding for a 12 V LiFePO4 pack. Updates the
+# `load_shed_tier` global (owned by greenhouse-base.yaml) that every other
+# package gates on:
+#
+#   tier 0  normal      everything runs
+#   tier 1  < ${loadshed_tier1_v}  non-essential loads off (grow lights, fans —
+#                                  YOUR packages: gate on load_shed_tier >= 1)
+#   tier 2  < ${loadshed_tier2_v}  watering only; vent stops moving; radio
+#                                  period multiplied (base handles the radio)
+#   tier 3  < ${loadshed_tier3_v}  all actuators off; hourly radio beacon
+#
+# Escalation is immediate on crossing a threshold. Recovery requires the
+# voltage to rise ${loadshed_recovery_hyst_v} ABOVE the tier's threshold
+# (default 0.25 V) so a sagging pack doesn't oscillate between tiers.
+# A NaN battery reading (sensor fault) freezes the current tier and logs.
+#
+# Tier *enforcement* is deliberately distributed: each actuator/automation
+# package polices itself against load_shed_tier (see the actuator packages
+# and docs/EXTENDING.md). This package only decides the tier.
+#
+# The `loadshed_tier_changed` script is an extension hook: !extend it in your
+# node config to shed custom loads on any tier change (see docs/EXTENDING.md).
+#
+# Requires:
+#   * a battery voltage sensor id ${loadshed_battery_sensor} (V) —
+#     default matches sensor-battery.yaml
+#
+# Substitutions:
+#   loadshed_battery_sensor    (default: battery_voltage)
+#   loadshed_tier1_v           (default: 12.8)
+#   loadshed_tier2_v           (default: 12.4)
+#   loadshed_tier3_v           (default: 12.0)
+#   loadshed_recovery_hyst_v   (default: 0.25)
+#   loadshed_check_interval_s  (default: 30)
+# =============================================================================
+
+substitutions:
+  loadshed_battery_sensor: battery_voltage
+  loadshed_tier1_v: "12.8"
+  loadshed_tier2_v: "12.4"
+  loadshed_tier3_v: "12.0"
+  loadshed_recovery_hyst_v: "0.25"
+  loadshed_check_interval_s: "30"
+
+text_sensor:
+  - platform: template
+    id: load_shed_state
+    name: Load Shed State
+    icon: mdi:battery-heart-variant
+    update_interval: never
+
+script:
+  # Extension hook — runs on every tier change. Default: log only.
+  # !extend this script in your node config to shed custom loads.
+  - id: loadshed_tier_changed
+    mode: queued
+    then:
+      - lambda: |-
+          ESP_LOGI("loadshed", "tier is now %d", id(load_shed_tier));
+
+interval:
+  - interval: ${loadshed_check_interval_s}s
+    then:
+      - lambda: |-
+          static const char *TIER_NAMES[] = {
+            "Normal", "Tier 1 - conserve", "Tier 2 - critical", "Tier 3 - emergency"};
+
+          const float v = id(${loadshed_battery_sensor}).state;
+          if (std::isnan(v)) {
+            ESP_LOGW("loadshed", "battery voltage unavailable, holding tier %d",
+                     id(load_shed_tier));
+            return;
+          }
+
+          const int prev = id(load_shed_tier);
+          int t = prev;
+          const float h = ${loadshed_recovery_hyst_v};
+
+          // Escalate immediately on crossing a threshold…
+          if (v < ${loadshed_tier3_v})
+            t = 3;
+          else if (v < ${loadshed_tier2_v})
+            t = std::max(t, 2);
+          else if (v < ${loadshed_tier1_v})
+            t = std::max(t, 1);
+
+          // …recover only with hysteresis headroom (may cascade when the
+          // voltage is clearly high, e.g. after a sunny charging day).
+          if (t == 3 && v >= ${loadshed_tier3_v} + h) t = 2;
+          if (t == 2 && v >= ${loadshed_tier2_v} + h) t = 1;
+          if (t == 1 && v >= ${loadshed_tier1_v} + h) t = 0;
+
+          if (t != prev) {
+            ESP_LOGW("loadshed", "battery %.2f V: tier %d -> %d", v, prev, t);
+            id(load_shed_tier) = t;
+            id(loadshed_tier_changed).execute();
+          }
+
+          // Publish name on change or first run.
+          if (t != prev || !id(load_shed_state).has_state())
+            id(load_shed_state).publish_state(TIER_NAMES[t]);

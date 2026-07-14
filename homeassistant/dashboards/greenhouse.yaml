@@ -1,0 +1,92 @@
+# frodas — example Lovelace dashboard.
+# Add via Settings -> Dashboards -> Add dashboard -> "New dashboard from YAML"
+# or paste views into an existing dashboard's raw editor.
+# Entity ids assume node_name "frodas-greenhouse" — adjust if renamed.
+title: Greenhouse
+views:
+  - title: Overview
+    icon: mdi:greenhouse
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: gauge
+            name: Soil Moisture
+            entity: sensor.frodas_greenhouse_soil_moisture
+            min: 0
+            max: 100
+            severity:
+              red: 0
+              yellow: 30
+              green: 45
+          - type: entities
+            title: Climate
+            entities:
+              - sensor.frodas_greenhouse_greenhouse_temperature
+              - sensor.frodas_greenhouse_greenhouse_humidity
+              - sensor.frodas_dew_point
+              - sensor.frodas_greenhouse_greenhouse_illuminance
+              - binary_sensor.frodas_frost_risk
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Power
+            entities:
+              - sensor.frodas_greenhouse_battery_voltage
+              - sensor.frodas_battery_soc_estimate
+              - sensor.frodas_greenhouse_solar_current
+              - sensor.frodas_greenhouse_solar_power
+              - sensor.frodas_greenhouse_load_shed_tier
+              - sensor.frodas_greenhouse_load_shed_state
+          - type: entities
+            title: Link
+            entities:
+              - binary_sensor.frodas_radio_window
+              - binary_sensor.frodas_telemetry_stale
+              - sensor.frodas_greenhouse_wifi_rssi
+              - sensor.frodas_greenhouse_uptime
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Watering (setpoints apply at next radio window)
+            entities:
+              - switch.frodas_greenhouse_watering_enabled
+              - number.frodas_greenhouse_watering_soil_threshold
+              - number.frodas_greenhouse_watering_window_start_hour
+              - number.frodas_greenhouse_watering_window_end_hour
+              - number.frodas_greenhouse_watering_max_daily_seconds
+              - sensor.frodas_greenhouse_watering_used_today
+              - switch.frodas_greenhouse_irrigation_valve
+              - switch.frodas_greenhouse_water_pump
+          - type: entities
+            title: Ventilation
+            entities:
+              - select.frodas_greenhouse_ventilation_mode
+              - number.frodas_greenhouse_vent_open_above_temperature
+              - number.frodas_greenhouse_vent_close_below_temperature
+              - number.frodas_greenhouse_vent_open_above_humidity
+              - number.frodas_greenhouse_vent_close_below_humidity
+              - cover.frodas_greenhouse_roof_vent
+
+  - title: History
+    icon: mdi:chart-line
+    cards:
+      - type: history-graph
+        title: Climate (48 h)
+        hours_to_show: 48
+        entities:
+          - sensor.frodas_greenhouse_greenhouse_temperature
+          - sensor.frodas_greenhouse_greenhouse_humidity
+      - type: history-graph
+        title: Soil & Watering (48 h)
+        hours_to_show: 48
+        entities:
+          - sensor.frodas_greenhouse_soil_moisture
+          - switch.frodas_greenhouse_irrigation_valve
+      - type: history-graph
+        title: Power (7 d)
+        hours_to_show: 168
+        entities:
+          - sensor.frodas_greenhouse_battery_voltage
+          - sensor.frodas_greenhouse_load_shed_tier

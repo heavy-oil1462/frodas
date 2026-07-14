@@ -1,0 +1,77 @@
+# =============================================================================
+# frodas — packages/sensor-battery.yaml
+# -----------------------------------------------------------------------------
+# Power monitoring: battery voltage via resistor divider on an ADC1 pin, and
+# solar charge current/power via an INA219 (I²C, high side of the panel input).
+#
+# battery_voltage is the input to automation-load-shedding.yaml — every frodas
+# node that shed loads needs this package (or a custom package providing a
+# sensor with the same id; see docs/EXTENDING.md).
+#
+# If you have no INA219, write your own package with just the ADC block —
+# only the ${battery_sensor_id} id is a contract, the solar sensors are not.
+# Requires: packages/bus-i2c.yaml (for the INA219).
+#
+# Substitutions:
+#   battery_adc_pin          ADC1 pin (default: GPIO35, input-only)
+#   battery_divider_ratio    (R_top + R_bottom) / R_bottom. Default "6.0"
+#                            (100k : 20k → 15 V max at ~2.5 V ADC input)
+#   battery_update_interval  Sample rate (default: 15s — load shedding input)
+#   battery_sensor_id        Sensor id (default: battery_voltage)
+#   ina219_address           I²C address (default: 0x40)
+#   ina219_shunt_resistance  Shunt value (default: 0.1 ohm)
+#   ina219_max_current       Expected max charge current (default: 3.2A)
+#   ina219_update_interval   Sample rate (default: 15s)
+#
+# Provides:
+#   sensor ids ${battery_sensor_id} (V), solar_current (A), solar_power (W),
+#   solar_bus_voltage (V, diagnostic)
+# =============================================================================
+
+substitutions:
+  battery_adc_pin: GPIO35
+  battery_divider_ratio: "6.0"
+  battery_update_interval: 15s
+  battery_sensor_id: battery_voltage
+  ina219_address: "0x40"
+  ina219_shunt_resistance: 0.1 ohm
+  ina219_max_current: 3.2A
+  ina219_update_interval: 15s
+
+sensor:
+  - platform: adc
+    pin: ${battery_adc_pin}
+    id: ${battery_sensor_id}
+    name: Battery Voltage
+    attenuation: 12db
+    update_interval: ${battery_update_interval}
+    unit_of_measurement: V
+    device_class: voltage
+    accuracy_decimals: 2
+    filters:
+      - median:
+          window_size: 5
+          send_every: 1
+          send_first_at: 1
+      - multiply: ${battery_divider_ratio}
+
+  - platform: ina219
+    i2c_id: bus_a
+    address: ${ina219_address}
+    shunt_resistance: ${ina219_shunt_resistance}
+    max_current: ${ina219_max_current}
+    max_voltage: 26.0V
+    update_interval: ${ina219_update_interval}
+    current:
+      name: Solar Current
+      id: solar_current
+      accuracy_decimals: 2
+    power:
+      name: Solar Power
+      id: solar_power
+      accuracy_decimals: 1
+    bus_voltage:
+      name: Solar Bus Voltage
+      id: solar_bus_voltage
+      accuracy_decimals: 2
+      entity_category: diagnostic

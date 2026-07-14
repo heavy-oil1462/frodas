@@ -1,0 +1,266 @@
+# =============================================================================
+# frodas — greenhouse-base.yaml
+# -----------------------------------------------------------------------------
+# Core package for every frodas node: board, radio duty cycle, MQTT transport,
+# time source, load-shed tier state, and device health entities.
+#
+# Everything plant- or safety-critical runs locally on the ESP32. WiFi is OFF
+# by default and is only enabled for a short "radio window" every
+# ${telemetry_interval_min} minutes to publish telemetry and pick up retained
+# setpoints. No deep sleep: the CPU keeps running control loops continuously.
+#
+# Substitutions (override from your node config):
+#   node_name                 Hostname / MQTT node id (lowercase, no spaces).
+#   friendly_name             Human-readable name used by Home Assistant.
+#   board                     PlatformIO board id (default: esp32dev).
+#   mqtt_root                 Root of the MQTT topic tree (default: frodas).
+#   mqtt_port                 Broker port (default: 1883).
+#   timezone                  IANA timezone for schedule windows.
+#   log_level                 Logger level (default: INFO).
+#   telemetry_interval_min    Minutes between radio windows (default: 10).
+#   radio_connect_timeout_s   Seconds to wait for MQTT after wifi.enable.
+#   radio_linger_s            Seconds to stay connected once MQTT is up
+#                             (lets telemetry flush + retained setpoints land).
+#   loadshed_tier2_radio_mult Radio period multiplier at tier 2 (default: 3).
+#   loadshed_tier3_beacon_min Radio period in minutes at tier 3 (default: 60).
+#
+# Globals provided to other packages (the package contract, see EXTENDING.md):
+#   load_shed_tier   int, 0..3. 0 = normal. Updated by
+#                    automation-load-shedding.yaml; stays 0 without it.
+#
+# MQTT semantics are specified in docs/PROTOCOL.md. In particular:
+#   * birth_message is intentionally DISABLED so that Home Assistant discovery
+#     omits per-entity availability — entities keep their retained values in
+#     HA while the radio sleeps. "online" is published manually on connect.
+#   * The broker's LWT flips <root>/<node>/status to "offline" (retained)
+#     roughly one keepalive after each radio window closes. status therefore
+#     means "radio window open", NOT "device dead". Device health is inferred
+#     from telemetry freshness (see homeassistant/packages/greenhouse.yaml).
+# =============================================================================
+
+substitutions:
+  node_name: frodas
+  friendly_name: Frodas Greenhouse
+  board: esp32dev
+  mqtt_root: frodas
+  mqtt_port: "1883"
+  timezone: Europe/Stockholm
+  log_level: INFO
+  telemetry_interval_min: "10"
+  radio_connect_timeout_s: "25"
+  radio_linger_s: "20"
+  loadshed_tier2_radio_mult: "3"
+  loadshed_tier3_beacon_min: "60"
+
+esphome:
+  name: ${node_name}
+  friendly_name: ${friendly_name}
+  # First radio window right after boot: publishes a full snapshot and pulls
+  # retained setpoints before the first control-loop decisions.
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: radio_window
+
+esp32:
+  board: ${board}
+  framework:
+    type: esp-idf
+
+logger:
+  level: ${log_level}
+  baud_rate: 115200
+
+# OTA only works while a radio window is open (or with "Radio Always On").
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+safe_mode:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: LIGHT
+  fast_connect: true
+  enable_on_boot: true
+  # NEVER reboot because WiFi is absent — WiFi is absent by design.
+  reboot_timeout: 0s
+
+time:
+  - platform: sntp
+    id: net_time
+    timezone: ${timezone}
+
+mqtt:
+  broker: !secret mqtt_broker
+  port: ${mqtt_port}
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  topic_prefix: ${mqtt_root}/${node_name}
+  discovery: true
+  discovery_retain: true
+  keepalive: 15s
+  # NEVER reboot because MQTT is absent — the broker is unreachable by design
+  # whenever the radio is off.
+  reboot_timeout: 0s
+  # birth_message intentionally disabled — see header + docs/PROTOCOL.md.
+  birth_message:
+  will_message:
+    topic: ${mqtt_root}/${node_name}/status
+    payload: offline
+    retain: true
+  on_connect:
+    - mqtt.publish:
+        topic: ${mqtt_root}/${node_name}/status
+        payload: online
+        retain: true
+    - script.execute: publish_snapshot
+
+globals:
+  # Load-shedding tier, 0..3. Owned by base so every package can gate on it
+  # even when automation-load-shedding.yaml is not included.
+  - id: load_shed_tier
+    type: int
+    restore_value: true
+    initial_value: "0"
+  # Minutes until the next radio window. Reset by the radio_window script.
+  - id: radio_countdown_min
+    type: int
+    restore_value: false
+    initial_value: "0"
+
+script:
+  # One radio window: enable WiFi, wait for MQTT, linger so telemetry flushes
+  # and retained setpoint commands arrive, then switch the radio back off.
+  - id: radio_window
+    mode: single
+    then:
+      - lambda: |-
+          const int tier = id(load_shed_tier);
+          int period = ${telemetry_interval_min};
+          if (tier >= 3) {
+            period = ${loadshed_tier3_beacon_min};
+          } else if (tier >= 2) {
+            period = ${telemetry_interval_min} * ${loadshed_tier2_radio_mult};
+          }
+          id(radio_countdown_min) = period;
+      - wifi.enable:
+      - wait_until:
+          condition:
+            mqtt.connected:
+          timeout: ${radio_connect_timeout_s}s
+      - if:
+          condition:
+            mqtt.connected:
+          then:
+            - delay: ${radio_linger_s}s
+          else:
+            - logger.log:
+                level: WARN
+                format: "radio window: no MQTT connection within timeout"
+      - if:
+          condition:
+            switch.is_off: radio_always_on
+          then:
+            - wifi.disable:
+
+  # Publish the current state of every entity. Sensors sample continuously
+  # for the local control loops while the radio is off; this pushes a full
+  # snapshot the moment MQTT connects so a short window always carries fresh
+  # data. The #ifdef guards keep base compiling in minimal compositions.
+  - id: publish_snapshot
+    mode: single
+    then:
+      - lambda: |-
+          #ifdef USE_SENSOR
+          for (auto *s : App.get_sensors())
+            if (s->has_state()) s->publish_state(s->state);
+          #endif
+          #ifdef USE_BINARY_SENSOR
+          for (auto *bs : App.get_binary_sensors())
+            if (bs->has_state()) bs->publish_state(bs->state);
+          #endif
+          #ifdef USE_TEXT_SENSOR
+          for (auto *ts : App.get_text_sensors())
+            if (ts->has_state()) ts->publish_state(ts->state);
+          #endif
+          #ifdef USE_SWITCH
+          for (auto *sw : App.get_switches())
+            sw->publish_state(sw->state);
+          #endif
+          #ifdef USE_NUMBER
+          for (auto *n : App.get_numbers())
+            if (!std::isnan(n->state)) n->publish_state(n->state);
+          #endif
+          #ifdef USE_SELECT
+          for (auto *sel : App.get_selects())
+            if (!sel->state.empty()) sel->publish_state(sel->state);
+          #endif
+          #ifdef USE_COVER
+          for (auto *c : App.get_covers())
+            c->publish_state();
+          #endif
+
+interval:
+  # Radio scheduler tick. Interval length is fixed; the countdown target is
+  # recomputed from the load-shed tier at the start of every window.
+  - interval: 60s
+    then:
+      - lambda: |-
+          if (id(radio_countdown_min) > 0)
+            id(radio_countdown_min) -= 1;
+      - if:
+          condition:
+            lambda: 'return id(radio_countdown_min) <= 0;'
+          then:
+            - script.execute: radio_window
+
+switch:
+  # Commissioning aid: keeps the radio up continuously (OTA, live logs,
+  # HA interaction). Turn OFF for production — it defeats the power budget.
+  - platform: template
+    name: Radio Always On
+    id: radio_always_on
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+    command_retain: true
+    on_turn_on:
+      - wifi.enable:
+
+button:
+  - platform: restart
+    name: Restart
+    entity_category: diagnostic
+  - platform: template
+    name: Publish Snapshot
+    entity_category: diagnostic
+    on_press:
+      - script.execute: publish_snapshot
+
+sensor:
+  - platform: uptime
+    name: Uptime
+    id: uptime_s
+    update_interval: 60s
+    entity_category: diagnostic
+  - platform: wifi_signal
+    name: WiFi RSSI
+    id: wifi_rssi
+    update_interval: 30s
+    entity_category: diagnostic
+  # Numeric mirror of the load_shed_tier global (for Grafana / HA).
+  - platform: template
+    name: Load Shed Tier
+    id: load_shed_tier_sensor
+    lambda: 'return (float) id(load_shed_tier);'
+    update_interval: 30s
+    accuracy_decimals: 0
+    icon: mdi:battery-alert
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: version
+    name: ESPHome Version
+    entity_category: diagnostic

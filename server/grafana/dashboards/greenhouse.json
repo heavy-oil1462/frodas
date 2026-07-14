@@ -1,0 +1,380 @@
+{
+  "title": "Frodas Greenhouse",
+  "uid": "frodas-greenhouse",
+  "tags": ["frodas", "greenhouse"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "node",
+        "label": "Node",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+        "query": "label_values(battery_voltage_value, node)",
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Temperature / Humidity",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "greenhouse_temperature_value{node=\"$node\"}",
+          "legendFormat": "temperature °C"
+        },
+        {
+          "refId": "B",
+          "expr": "greenhouse_humidity_value{node=\"$node\"}",
+          "legendFormat": "humidity %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "spanNulls": 3600000}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "humidity %"},
+            "properties": [
+              {"id": "unit", "value": "percent"},
+              {"id": "custom.axisPlacement", "value": "right"},
+              {"id": "max", "value": 100}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "temperature °C"},
+            "properties": [{"id": "unit", "value": "celsius"}]
+          }
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 2,
+      "title": "Soil Moisture vs Watering Threshold",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "soil_moisture_value{node=\"$node\"}",
+          "legendFormat": "soil moisture"
+        },
+        {
+          "refId": "B",
+          "expr": "watering_soil_threshold_value{node=\"$node\"}",
+          "legendFormat": "watering threshold (setpoint)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "spanNulls": 3600000}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "watering threshold (setpoint)"},
+            "properties": [
+              {"id": "custom.lineStyle", "value": {"dash": [10, 10], "fill": "dash"}},
+              {"id": "custom.fillOpacity", "value": 0},
+              {"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}
+            ]
+          }
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 3,
+      "title": "Battery Voltage (load-shed tiers at 12.8 / 12.4 / 12.0 V)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "battery_voltage_value{node=\"$node\"}",
+          "legendFormat": "battery"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "min": 11.5,
+          "max": 14.6,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "spanNulls": 3600000,
+            "thresholdsStyle": {"mode": "dashed+area"}
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "orange", "value": 12.0},
+              {"color": "yellow", "value": 12.4},
+              {"color": "green", "value": 12.8}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 4,
+      "title": "Solar Charging",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "solar_current_value{node=\"$node\"}",
+          "legendFormat": "current A"
+        },
+        {
+          "refId": "B",
+          "expr": "solar_power_value{node=\"$node\"}",
+          "legendFormat": "power W"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "spanNulls": 3600000}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "current A"},
+            "properties": [{"id": "unit", "value": "amp"}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "power W"},
+            "properties": [
+              {"id": "unit", "value": "watt"},
+              {"id": "custom.axisPlacement", "value": "right"}
+            ]
+          }
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 5,
+      "title": "Actuators",
+      "type": "state-timeline",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "irrigation_valve_value{node=\"$node\"}",
+          "legendFormat": "valve"
+        },
+        {
+          "refId": "B",
+          "expr": "water_pump_value{node=\"$node\"}",
+          "legendFormat": "pump"
+        },
+        {
+          "refId": "C",
+          "expr": "roof_vent_value{node=\"$node\"}",
+          "legendFormat": "vent"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"fillOpacity": 70, "spanNulls": 3600000},
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {"text": "off/closed", "color": "transparent"},
+                "1": {"text": "ON/open", "color": "blue"}
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 6,
+      "title": "Load Shed Tier",
+      "type": "state-timeline",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "load_shed_tier_value{node=\"$node\"}",
+          "legendFormat": "tier"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"fillOpacity": 70, "spanNulls": 3600000},
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {"text": "normal", "color": "green"},
+                "1": {"text": "tier 1 — conserve", "color": "yellow"},
+                "2": {"text": "tier 2 — critical", "color": "orange"},
+                "3": {"text": "tier 3 — emergency", "color": "red"}
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 7,
+      "title": "Radio Windows (status topic)",
+      "type": "state-timeline",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 23},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "status_value{node=\"$node\"}",
+          "legendFormat": "radio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"fillOpacity": 70, "spanNulls": 300000},
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {"text": "sleeping", "color": "dark-blue"},
+                "1": {"text": "online", "color": "green"}
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 8,
+      "title": "WiFi RSSI",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 23},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "wifi_rssi_value{node=\"$node\"}",
+          "legendFormat": "RSSI"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBm",
+          "custom": {"drawStyle": "points", "pointSize": 4, "spanNulls": 3600000},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": -80},
+              {"color": "green", "value": -70}
+            ]
+          },
+          "color": {"mode": "thresholds"}
+        },
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 9,
+      "title": "Uptime",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 3, "w": 4, "x": 16, "y": 23},
+      "targets": [
+        {"refId": "A", "expr": "uptime_value{node=\"$node\"}"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s", "color": {"mode": "fixed", "fixedColor": "green"}},
+        "overrides": []
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"}
+    },
+    {
+      "id": 10,
+      "title": "Radio Availability (range)",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 3, "w": 4, "x": 20, "y": 23},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg_over_time(status_value{node=\"$node\"}[$__range]) * 100"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 2}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"}
+    },
+    {
+      "id": 11,
+      "title": "Watering Used Today",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+      "gridPos": {"h": 3, "w": 8, "x": 16, "y": 26},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "watering_used_today_value{node=\"$node\"}",
+          "legendFormat": "used"
+        },
+        {
+          "refId": "B",
+          "expr": "watering_max_daily_seconds_value{node=\"$node\"}",
+          "legendFormat": "daily cap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s", "decimals": 0},
+        "overrides": []
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"}
+    }
+  ]
+}

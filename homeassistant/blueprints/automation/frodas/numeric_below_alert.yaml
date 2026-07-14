@@ -1,0 +1,65 @@
+# frodas blueprint: alert when a numeric sensor stays below a threshold.
+# Used by homeassistant/packages/greenhouse.yaml for the low-battery and
+# frost-risk alerts; reusable for anything else (import it in HA:
+# Settings -> Automations -> Blueprints -> Import, or drop this file in
+# <config>/blueprints/automation/frodas/).
+blueprint:
+  name: "Frodas: numeric below threshold alert"
+  description: >-
+    Notify when a sensor stays below a threshold for a sustained period.
+    Designed for duty-cycled frodas nodes: state is retained between radio
+    windows, so numeric_state triggers keep working while the device sleeps.
+  domain: automation
+  input:
+    entity:
+      name: Sensor
+      selector:
+        entity:
+          domain: sensor
+    below:
+      name: Threshold
+      description: Alert when the sensor is below this value.
+      selector:
+        number:
+          min: -50
+          max: 200
+          step: 0.1
+          mode: box
+    for_minutes:
+      name: Sustained for (minutes)
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 1440
+          mode: box
+    title:
+      name: Notification title
+      default: "Frodas alert"
+      selector:
+        text:
+    message:
+      name: Notification message
+      selector:
+        text:
+    notify_service:
+      name: Notify service
+      description: e.g. notify.notify or notify.mobile_app_your_phone
+      default: notify.notify
+      selector:
+        text:
+
+mode: single
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input entity
+    below: !input below
+    for:
+      minutes: !input for_minutes
+
+action:
+  - service: !input notify_service
+    data:
+      title: !input title
+      message: !input message

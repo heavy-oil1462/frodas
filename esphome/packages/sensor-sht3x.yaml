@@ -1,0 +1,37 @@
+# =============================================================================
+# frodas — packages/sensor-sht3x.yaml
+# -----------------------------------------------------------------------------
+# SHT3x temperature / relative-humidity sensor (I²C).
+# Requires: packages/bus-i2c.yaml (bus id `bus_a`).
+#
+# Substitutions:
+#   sht3x_address          I²C address (default: 0x44; ADDR pin high: 0x45)
+#   sht3x_update_interval  Sample rate — sampling is local and cheap, so keep
+#                          it short for responsive control loops (default: 30s)
+#   sht3x_temp_id          Sensor id (default: greenhouse_temperature).
+#                          Referenced by automation-ventilation.yaml.
+#   sht3x_rh_id            Sensor id (default: greenhouse_humidity)
+#
+# Provides:
+#   sensor ids ${sht3x_temp_id} (°C), ${sht3x_rh_id} (%)
+# =============================================================================
+
+substitutions:
+  sht3x_address: "0x44"
+  sht3x_update_interval: 30s
+  sht3x_temp_id: greenhouse_temperature
+  sht3x_rh_id: greenhouse_humidity
+
+sensor:
+  - platform: sht3xd
+    i2c_id: bus_a
+    address: ${sht3x_address}
+    update_interval: ${sht3x_update_interval}
+    temperature:
+      name: Greenhouse Temperature
+      id: ${sht3x_temp_id}
+      accuracy_decimals: 1
+    humidity:
+      name: Greenhouse Humidity
+      id: ${sht3x_rh_id}
+      accuracy_decimals: 0
