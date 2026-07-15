@@ -1,0 +1,36 @@
+# =============================================================================
+# frodas — packages/watering-schedule-only.yaml
+# -----------------------------------------------------------------------------
+# No soil probe? Include this INSTEAD of a soil sensor package and watering
+# becomes pure schedule + budget: automation-watering.yaml still enforces the
+# window, soak spacing, daily cap, enable switch, valid-time and tier-3
+# gates — only the moisture feedback is gone.
+#
+# It works by providing the ${soil_sensor_id} contract as a constant 0 %
+# ("always dry"), so every soak-spaced pulse inside the window fires until
+# the daily budget is spent. The sensor is internal: it never reaches
+# MQTT/HA, so nothing pretends to be a real probe.
+#
+# Note the deliberate trade-off: the NaN fail-safe ("broken probe -> don't
+# water") cannot trigger, because there is no probe to break. Size
+# ${watering_default_max_daily_s} to what your plants and water supply
+# tolerate on the hottest day.
+#
+# Substitutions:
+#   soil_sensor_id   (default: soil_moisture — the automation-watering input)
+#
+# Provides:
+#   sensor id ${soil_sensor_id} (constant 0 %, internal)
+# =============================================================================
+
+substitutions:
+  soil_sensor_id: soil_moisture
+
+sensor:
+  - platform: template
+    id: ${soil_sensor_id}
+    internal: true
+    update_interval: 60s
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    lambda: "return 0.0;"

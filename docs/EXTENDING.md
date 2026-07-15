@@ -41,7 +41,7 @@ substitutions so any package can be swapped for a compatible one:
 | `radio_on` / `radio_off` | scripts | the radio package (radio-wifi, radio-openeth) | base's radio-window scheduler |
 | `net_time` | time component | base | automation-watering |
 | `battery_voltage` | sensor (V) | sensor-battery | automation-load-shedding (`loadshed_battery_sensor`) |
-| `soil_moisture` | sensor (%) | sensor-soil-capacitive | automation-watering (`watering_soil_sensor`) |
+| `soil_moisture` | sensor (%) | sensor-soil-capacitive, or watering-schedule-only (constant stub — schedule+budget watering without a probe) | automation-watering (`watering_soil_sensor`) |
 | `greenhouse_temperature` / `greenhouse_humidity` | sensors | sensor-sht3x | automation-ventilation (`vent_temp_sensor` / `vent_rh_sensor`) |
 | `irrigation_valve` | switch | actuator-latching-valve | automation-watering (`watering_valve`) |
 | `vent` | cover | actuator-vent-motor | automation-ventilation (`vent_cover`) |
