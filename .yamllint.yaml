@@ -6,6 +6,7 @@ ignore: |
   esphome/secrets.yaml
   esphome/.esphome/
   .esphome-sim/
+  frodas-config/
   result
 
 rules:

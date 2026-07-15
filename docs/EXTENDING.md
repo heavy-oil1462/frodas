@@ -55,6 +55,34 @@ the sensor ids from MQTT injections and `packages/radio-openeth.yaml`
 provides the radio scripts for an emulated NIC, and every automation runs
 unchanged (docs/SIMULATION.md).
 
+## Where does *my* node config live?
+
+Not in this repo — node configs are downstream consumers. Two good homes:
+
+* **A private config repo cloned inside your frodas checkout** (frodas
+  gitignores `frodas-config/`). Your config is substitutions + a package
+  list with `!include ../esphome/...` paths, so it always builds against the
+  frodas version you have checked out — ideal when you hack on both:
+
+  ```bash
+  cd frodas && git clone <your-private-config-repo> frodas-config
+  esphome run frodas-config/greenhouse.yaml
+  ```
+
+* **ESPHome remote packages** — no local frodas checkout needed, pin a ref:
+
+  ```yaml
+  packages:
+    frodas:
+      url: https://github.com/heavy-oil1462/frodas
+      ref: main            # pin a tag for production
+      refresh: 1d
+      files: [esphome/greenhouse-base.yaml, esphome/packages/radio-wifi.yaml, ...]
+  ```
+
+Every package file is standalone (no cross-`!include`s) and `!secret` always
+resolves against *your* config's secrets.yaml, so both forms work unchanged.
+
 ## Radio (transport) packages
 
 `greenhouse-base.yaml` never touches wifi directly. It drives the duty cycle
