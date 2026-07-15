@@ -1,0 +1,45 @@
+# =============================================================================
+# frodas — packages/radio-wifi.yaml
+# -----------------------------------------------------------------------------
+# WiFi radio transport for real hardware. Fulfils the base transport contract
+# (greenhouse-base.yaml header): provides the network component plus the
+# `radio_on` / `radio_off` scripts the base radio-window scheduler drives.
+#
+# WiFi starts enabled so the boot-time radio window can pull retained
+# setpoints; the base turns it off again afterwards. wifi.disable powers the
+# radio down abruptly, so the broker's LWT flips <node>/status to "offline"
+# about one keepalive later — that is the designed meaning of `status`
+# (docs/PROTOCOL.md).
+#
+# Secrets: wifi_ssid, wifi_password.
+#
+# Provides:
+#   scripts radio_on / radio_off (transport contract)
+#   sensor id wifi_rssi (dBm, diagnostic)
+# =============================================================================
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: LIGHT
+  fast_connect: true
+  enable_on_boot: true
+  # NEVER reboot because WiFi is absent — WiFi is absent by design.
+  reboot_timeout: 0s
+
+script:
+  - id: radio_on
+    mode: single
+    then:
+      - wifi.enable:
+  - id: radio_off
+    mode: single
+    then:
+      - wifi.disable:
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi RSSI
+    id: wifi_rssi
+    update_interval: 30s
+    entity_category: diagnostic

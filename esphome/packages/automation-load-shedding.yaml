@@ -51,6 +51,9 @@ text_sensor:
     name: Load Shed State
     icon: mdi:battery-heart-variant
     update_interval: never
+    # Pin the documented topic — ESPHome's MQTT default would publish this
+    # under sensor/ where Telegraf expects numbers (see greenhouse-base.yaml).
+    state_topic: ${mqtt_root}/${node_name}/text_sensor/load_shed_state/state
 
 script:
   # Extension hook — runs on every tier change. Default: log only.

@@ -39,6 +39,7 @@ substitutions:
 
 packages:
   base: !include greenhouse-base.yaml
+  radio: !include packages/radio-wifi.yaml
   i2c: !include packages/bus-i2c.yaml
   climate: !include packages/sensor-sht3x.yaml
   soil: !include packages/sensor-soil-capacitive.yaml

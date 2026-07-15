@@ -17,7 +17,8 @@ MQTT/VictoriaMetrics/Grafana server + Home Assistant integration.
 ## How to work here
 
 - Use the skills: `validate` (before every commit), `protocol-test`,
-  `server-stack`, `mock-device`, `firmware`.
+  `server-stack`, `mock-device`, `firmware`, `simulator` (real firmware
+  under QEMU — use for rule-level testing; slow).
 - Prefer the reusable tools in `tools/` over ad-hoc shell; extend a tool if
   something is missing, then document it in the matching skill.
 - Everything must stay green: `nix develop -c python3 tools/validate.py` and

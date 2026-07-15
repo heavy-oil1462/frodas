@@ -71,6 +71,17 @@ Grafana: http://localhost:3000 — the Frodas dashboard is auto-provisioned.
 python3 tools/mock_device.py --discovery   # watch Grafana fill up; HA finds it
 ```
 
+Or go one better and run the **real firmware** under QEMU in a container,
+against your own broker and Home Assistant, with a web control panel to
+inject sensor values and time of day and watch the actual on-device rules
+react ([docs/SIMULATION.md](docs/SIMULATION.md)):
+
+```bash
+python3 tools/sim_container.py build
+python3 tools/sim_container.py run --broker <mqtt-host> --username u --password p
+# http://localhost:8080 — sliders, presets, live entity state
+```
+
 **3. Firmware**:
 
 ```bash
@@ -94,9 +105,11 @@ notes in the package header. Example Lovelace: `homeassistant/dashboards/`.
 esphome/                 firmware: greenhouse-base.yaml + composable packages/
 server/                  docker compose: mosquitto, telegraf, VictoriaMetrics, grafana
 homeassistant/           HA package, alert blueprint, lovelace example
-docs/                    PROTOCOL.md · EXTENDING.md · HARDWARE.md
-tools/                   validate.py · stack.py · mock_device.py · test_protocol.py
-.claude/skills/          agent skills wrapping the tools (validate, server-stack, …)
+sim/                     real-firmware simulator: Containerfile, web UI, QEMU glue
+docs/                    PROTOCOL.md · EXTENDING.md · HARDWARE.md · SIMULATION.md
+tools/                   validate.py · stack.py · mock_device.py · sim_container.py
+                         test_protocol.py · test_sim.py
+.claude/skills/          agent skills wrapping the tools (validate, simulator, …)
 ```
 
 The MQTT contract (topics, retention rules, availability semantics, the
@@ -117,6 +130,7 @@ no buckets. Swapping back is a two-service change in
 ```bash
 nix develop -c python3 tools/validate.py        # full validation gate (CI runs this)
 nix develop -c python3 tools/test_protocol.py   # broker-level protocol test
+sudo -E nix develop .#sim -c python3 tools/test_sim.py  # REAL firmware under QEMU (slow)
 esphome compile esphome/example-greenhouse.yaml # full firmware build
 ```
 

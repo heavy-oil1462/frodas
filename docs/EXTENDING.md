@@ -18,6 +18,7 @@ substitutions:
 
 packages:
   base: !include greenhouse-base.yaml            # always
+  radio: !include packages/radio-wifi.yaml       # exactly one radio package
   i2c: !include packages/bus-i2c.yaml            # once, if any I²C sensor
   soil: !include packages/sensor-soil-capacitive.yaml
   valve: !include packages/actuator-latching-valve.yaml
@@ -37,6 +38,7 @@ substitutions so any package can be swapped for a compatible one:
 | id (default) | Kind | Provided by | Consumed by |
 |---|---|---|---|
 | `load_shed_tier` | global int 0–3 | **base** (always 0 without the load-shedding package) | every actuator/automation package |
+| `radio_on` / `radio_off` | scripts | the radio package (radio-wifi, radio-openeth) | base's radio-window scheduler |
 | `net_time` | time component | base | automation-watering |
 | `battery_voltage` | sensor (V) | sensor-battery | automation-load-shedding (`loadshed_battery_sensor`) |
 | `soil_moisture` | sensor (%) | sensor-soil-capacitive | automation-watering (`watering_soil_sensor`) |
@@ -48,6 +50,24 @@ substitutions so any package can be swapped for a compatible one:
 Swapping hardware = writing a package that provides the same id. A DS18B20
 soil-temperature-compensated probe, an SHTC3 instead of the SHT3x, a
 current-shunt battery monitor — all fine as long as the id and unit match.
+The simulator is the extreme case: `packages/sim-sensors.yaml` provides all
+the sensor ids from MQTT injections and `packages/radio-openeth.yaml`
+provides the radio scripts for an emulated NIC, and every automation runs
+unchanged (docs/SIMULATION.md).
+
+## Radio (transport) packages
+
+`greenhouse-base.yaml` never touches wifi directly. It drives the duty cycle
+through two scripts that exactly one included radio package must provide:
+
+* `radio_on` — bring the transport up
+* `radio_off` — take it down (called only when "Radio Always On" is off)
+
+`packages/radio-wifi.yaml` is the hardware implementation (wifi +
+wifi.enable/disable + RSSI diagnostics); `packages/radio-openeth.yaml` the
+QEMU one (MQTT-layer disconnect). An ethernet-wired or LoRa-bridged node is
+a new radio package, not a base edit. Keep `reboot_timeout: 0s` semantics:
+a frodas node must never reboot just because the network is absent.
 
 ## Writing a sensor package
 

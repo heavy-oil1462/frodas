@@ -8,14 +8,17 @@ Usage:
 
 Checks:
     yaml       yamllint over the whole repo (.yamllint.yaml rules)
-    esphome    `esphome config` on the base and the example composition
-               (auto-provisions esphome/secrets.yaml from the example)
+    esphome    `esphome config` on the example and sim compositions — the
+               base is transport-agnostic and only validates composed with a
+               radio package (auto-provisions esphome/secrets.yaml)
     compose    Docker Compose file parses (`docker compose config -q`)
     telegraf   telegraf.conf is valid TOML with the expected inputs/outputs
     mosquitto  mosquitto.conf enforces auth + persistence
     grafana    provisioning YAML + dashboard JSON parse, datasource UIDs match
     ha         Home Assistant package/blueprint/dashboard YAML parses
-    python     tools/*.py byte-compile
+    sim        web UI injection keys match sim-sensors.yaml topics;
+               sim/Containerfile only COPYs paths that exist
+    python     tools/*.py + sim/*.py byte-compile
 
 Intended entry points: `.claude/skills/validate`, CI, and pre-commit.
 Run inside the devshell (`nix develop`) so all binaries are present.
@@ -68,7 +71,7 @@ def check_esphome() -> bool:
         warn("provisioned esphome/secrets.yaml from example (placeholders)")
 
     good = True
-    for config in ("greenhouse-base.yaml", "example-greenhouse.yaml"):
+    for config in ("example-greenhouse.yaml", "sim-greenhouse.yaml"):
         proc = run([esphome, "config", str(ESPHOME_DIR / config)], timeout=300)
         if proc.returncode != 0:
             fail(f"esphome config {config}:")
@@ -224,14 +227,67 @@ def check_ha() -> bool:
 
 def check_python() -> bool:
     good = True
-    for path in sorted((REPO_ROOT / "tools").glob("*.py")):
+    files = sorted((REPO_ROOT / "tools").glob("*.py")) + sorted(
+        (REPO_ROOT / "sim").glob("*.py"))
+    for path in files:
         try:
             py_compile.compile(str(path), doraise=True)
         except py_compile.PyCompileError as err:
-            fail(f"{path.name}: {err}")
+            fail(f"{path.relative_to(REPO_ROOT)}: {err}")
             good = False
     if good:
-        ok("tools/*.py byte-compile")
+        ok(f"{len(files)} python files byte-compile (tools/ + sim/)")
+    return good
+
+
+def check_sim() -> bool:
+    """Cross-artifact contract: web UI <-> sim-sensors.yaml <-> Containerfile."""
+    import re
+
+    good = True
+
+    # Injection keys offered by the web UI must be exactly the sim/<key>
+    # topics the firmware's mqtt_subscribe sensors listen on.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "frodas_sim_webui", REPO_ROOT / "sim" / "webui.py")
+    webui = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(webui)
+    ui_keys = set(webui.INJECTIONS)
+
+    sensors_yaml = (ESPHOME_DIR / "packages" / "sim-sensors.yaml").read_text()
+    fw_keys = set(re.findall(
+        r"topic:\s*\$\{mqtt_root\}/\$\{node_name\}/sim/(\S+)", sensors_yaml))
+    if ui_keys != fw_keys:
+        fail(f"sim injection keys drifted: webui={sorted(ui_keys)} "
+             f"firmware={sorted(fw_keys)}")
+        good = False
+    else:
+        ok(f"web UI injection keys match sim-sensors.yaml ({len(ui_keys)})")
+
+    # Presets must only reference known keys (or 'time').
+    bad_presets = {
+        name for name, preset in webui.PRESETS.items()
+        if set(preset) - ui_keys - {"time"}
+    }
+    if bad_presets:
+        fail(f"web UI presets use unknown keys: {sorted(bad_presets)}")
+        good = False
+    else:
+        ok(f"web UI presets reference valid keys ({len(webui.PRESETS)})")
+
+    # Containerfile must only COPY repo paths that exist.
+    containerfile = (REPO_ROOT / "sim" / "Containerfile").read_text()
+    for line in containerfile.splitlines():
+        if line.startswith("COPY ") and "--from=" not in line:
+            sources = line.split()[1:-1]
+            for src in sources:
+                if not (REPO_ROOT / src.rstrip("/")).exists():
+                    fail(f"Containerfile COPYs missing path: {src}")
+                    good = False
+    if good:
+        ok("Containerfile COPY sources exist")
     return good
 
 
@@ -243,6 +299,7 @@ CHECKS = {
     "mosquitto": check_mosquitto,
     "grafana": check_grafana,
     "ha": check_ha,
+    "sim": check_sim,
     "python": check_python,
 }
 

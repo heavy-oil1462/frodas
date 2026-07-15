@@ -5,6 +5,7 @@ ignore: |
   .venv/
   esphome/secrets.yaml
   esphome/.esphome/
+  .esphome-sim/
   result
 
 rules:

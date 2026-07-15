@@ -1,0 +1,34 @@
+# =============================================================================
+# frodas — packages/radio-openeth.yaml
+# -----------------------------------------------------------------------------
+# Simulation radio transport: OPENETH is the ethernet MAC that Espressif's
+# QEMU fork emulates (`-nic user,model=open_eth`). This package lets the real,
+# unmodified firmware logic run inside a container — see docs/SIMULATION.md.
+#
+# The radio duty cycle is emulated at the MQTT layer: an emulated NIC cannot
+# be powered down, so `radio_off` disconnects MQTT instead. A clean MQTT
+# disconnect never fires the broker LWT, so `radio_off` first publishes the
+# retained "offline" status the LWT would have produced — the observable
+# protocol (docs/PROTOCOL.md) stays identical to real hardware.
+#
+# Provides:
+#   scripts radio_on / radio_off (transport contract, greenhouse-base.yaml)
+# =============================================================================
+
+ethernet:
+  type: OPENETH
+
+script:
+  - id: radio_on
+    mode: single
+    then:
+      - mqtt.enable:
+  - id: radio_off
+    mode: single
+    then:
+      # Emulate the LWT the abrupt WiFi power-down would have triggered.
+      - mqtt.publish:
+          topic: ${mqtt_root}/${node_name}/status
+          payload: offline
+          retain: true
+      - mqtt.disable:

@@ -1,0 +1,46 @@
+# =============================================================================
+# frodas — sim/Containerfile
+# -----------------------------------------------------------------------------
+# Simulated greenhouse in one container: the REAL frodas firmware (compiled
+# for esp32 at first start, from your MQTT settings) running under Espressif
+# QEMU, plus the control panel (sim/webui.py) for injecting sensor values and
+# time of day. See docs/SIMULATION.md; drive it via tools/sim_container.py.
+#
+#   podman build -f sim/Containerfile -t frodas-sim .
+#   podman run -d --name frodas-sim -p 8080:8080 \
+#     -v frodas-sim-cache:/cache \
+#     -e MQTT_HOST=192.168.1.10 -e MQTT_USER=frodas -e MQTT_PASSWORD=... \
+#     frodas-sim
+#
+# Build context = repo root (esphome/, sim/, tools/ are copied in).
+# =============================================================================
+
+# --- Stage 1: Espressif's QEMU fork (esp32 machine, open_eth NIC) via nix ---
+FROM docker.io/nixos/nix:2.28.3 AS qemu
+RUN nix --extra-experimental-features 'nix-command flakes' \
+        build github:SFrijters/nix-qemu-espressif#qemu-esp32 -o /result \
+    && mkdir -p /closure \
+    && nix --extra-experimental-features nix-command \
+        copy --no-check-sigs --to /closure "$(readlink -f /result)" \
+    && readlink -f /result > /closure/qemu-path
+
+# --- Stage 2: runtime — esphome toolchain + qemu + the simulator UI --------
+# The esphome image compiles the firmware at container start (cached in the
+# /cache volume) so the broker/credentials are plain `podman run -e` config,
+# not baked into the image.
+FROM ghcr.io/esphome/esphome:2026.6.2
+
+COPY --from=qemu /closure/nix /nix
+COPY --from=qemu /closure/qemu-path /opt/qemu-path
+
+RUN pip install --no-cache-dir paho-mqtt
+
+COPY esphome/ /app/esphome/
+COPY tools/_lib.py /app/tools/_lib.py
+COPY sim/webui.py sim/entrypoint.py /app/sim/
+
+VOLUME /cache
+EXPOSE 8080
+# udp/123 (simulated NTP) stays container-internal: only QEMU talks to it.
+
+ENTRYPOINT ["python3", "/app/sim/entrypoint.py"]

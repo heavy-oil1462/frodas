@@ -32,19 +32,32 @@ Telegraf topic parser turns them into VictoriaMetrics metric names
 (`<object_id>_value{node="<node>"}`), and the Grafana dashboard and HA
 package reference them.
 
+Simulated nodes (docs/SIMULATION.md) additionally consume a
+`frodas/<node>/sim/<key>` subtree — retained raw sensor injections for the
+firmware's mqtt_subscribe twins. It is an input, not telemetry: four levels
+deep, so Telegraf's consumers never pick it up, and it exists only when
+`packages/sim-sensors.yaml` is included. Real nodes have no `sim/` topics.
+
 ## The duty cycle, and what "offline" means
 
 The node's radio is OFF by default. Every `telemetry_interval_min`
 (default 10) it opens a **radio window**:
 
 ```
- wifi.enable ──► MQTT connect ──► publish "online" (retained)
+ radio_on    ──► MQTT connect ──► publish "online" (retained)
              ──► publish full state snapshot (every entity, retained)
              ──► linger radio_linger_s (default 20 s):
                    retained setpoint commands arrive and are applied
-             ──► wifi.disable
+             ──► radio_off
  …keepalive (15 s) expires ──► broker publishes LWT: status = "offline"
 ```
+
+`radio_on`/`radio_off` come from the node's radio package: on hardware
+(`packages/radio-wifi.yaml`) they are `wifi.enable`/`wifi.disable` and the
+abrupt power-down makes the broker fire the LWT one keepalive later. The
+simulator (`packages/radio-openeth.yaml`) disconnects cleanly instead, so it
+publishes the retained `offline` itself, immediately — same observable
+protocol, slightly earlier timestamp.
 
 Consequences, all deliberate:
 

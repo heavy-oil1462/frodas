@@ -1,0 +1,70 @@
+# =============================================================================
+# frodas — sim-greenhouse.yaml
+# -----------------------------------------------------------------------------
+# The reference node with its hardware swapped out, its brain left in: real
+# greenhouse-base + the REAL actuator and automation packages, with sensors
+# replaced by injectable mqtt_subscribe twins (packages/sim-sensors.yaml) and
+# WiFi replaced by QEMU's emulated ethernet (packages/radio-openeth.yaml).
+#
+# Compiled for a stock esp32dev board and executed under Espressif's QEMU —
+# the shipped container does exactly that (docs/SIMULATION.md):
+#
+#   python3 tools/sim_container.py build
+#   python3 tools/sim_container.py run --broker <your-mqtt-host>
+#
+# Inject sensor values and steer time-of-day from the web UI (sim/webui.py);
+# the watering / ventilation / load-shedding rules that react are the same
+# C++ compiled onto real nodes.
+#
+# sntp_server defaults to 10.0.2.2 = the container host as seen from QEMU
+# user-mode networking, where webui.py serves simulated NTP time.
+# =============================================================================
+
+substitutions:
+  node_name: frodas-sim
+  friendly_name: Frodas Sim Greenhouse
+  timezone: Europe/Stockholm
+  sntp_server: 10.0.2.2
+  # The web UI's time-of-day slider should take effect within seconds, not
+  # the production 15 min re-sync cadence.
+  sntp_update_interval: 15s
+
+  # Frequent windows: rule tests shouldn't wait 10 min for setpoints to land.
+  # The web UI keeps "Radio Always On" retained-ON by default anyway; turn it
+  # off from HA or the UI to watch the real duty-cycle behaviour.
+  telemetry_interval_min: "2"
+  # QEMU's emulated ethernet + DHCP takes ~25 s from power-on — just past the
+  # hardware default. Give the boot radio window headroom so the first
+  # connect succeeds and retained state lands immediately.
+  radio_connect_timeout_s: "60"
+
+# Keep the emulated flash pristine: QEMU's flash + deferred NVS commits can
+# assert-crash the guest (xQueueGenericSend), and a mutated image crashloops
+# on the next boot. The sim doesn't need flash persistence anyway — retained
+# MQTT commands restore every setpoint at connect (docs/PROTOCOL.md).
+preferences:
+  flash_write_interval: 100000h
+
+# QEMU-stability sdkconfig (sim only — never for hardware): TCG emulation
+# starves the second core (interrupt-wdt panics, queue asserts) and a warm
+# reboot faults, so run single-core with the watchdogs off. This merges into
+# the base's esp32/framework block.
+esp32:
+  framework:
+    sdkconfig_options:
+      CONFIG_FREERTOS_UNICORE: "y"
+      CONFIG_ESP_INT_WDT: "n"
+      # The task WDT must stay on (ESPHome core static_asserts on it);
+      # a long timeout absorbs TCG scheduling hiccups instead.
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"
+
+packages:
+  base: !include greenhouse-base.yaml
+  radio: !include packages/radio-openeth.yaml
+  sensors: !include packages/sim-sensors.yaml
+  valve: !include packages/actuator-latching-valve.yaml
+  pump: !include packages/actuator-pump-12v.yaml
+  vent_motor: !include packages/actuator-vent-motor.yaml
+  watering: !include packages/automation-watering.yaml
+  ventilation: !include packages/automation-ventilation.yaml
+  load_shedding: !include packages/automation-load-shedding.yaml

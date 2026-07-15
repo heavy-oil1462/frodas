@@ -1,0 +1,88 @@
+# =============================================================================
+# frodas — packages/sim-sensors.yaml
+# -----------------------------------------------------------------------------
+# Injectable replacements for every stock hardware sensor. Each sensor carries
+# the exact id + name of its hardware counterpart, so the real automation
+# packages (watering / ventilation / load shedding) run unmodified against
+# values you set from the simulator web UI (sim/webui.py) — or from anything
+# that publishes to the injection topics:
+#
+#   <mqtt_root>/<node_name>/sim/temperature    °C   (Greenhouse Temperature)
+#   <mqtt_root>/<node_name>/sim/humidity       %    (Greenhouse Humidity)
+#   <mqtt_root>/<node_name>/sim/soil           %    (Soil Moisture)
+#   <mqtt_root>/<node_name>/sim/battery        V    (Battery Voltage)
+#   <mqtt_root>/<node_name>/sim/illuminance    lx   (Greenhouse Illuminance)
+#   <mqtt_root>/<node_name>/sim/solar_current  A    (Solar Current)
+#
+# Publish retained so values survive the emulated radio duty cycle exactly
+# like setpoints do. The `sim/` subtree is invisible to telegraf (it only
+# consumes per-entity `<component>/<object_id>/state` topics), so injected
+# inputs and observed entity states stay cleanly separated.
+#
+# Fail-safe semantics are preserved: before the first injection a sensor has
+# no state (NaN), which the automations already treat as "sensor broken"
+# (watering refuses to start, load shedding holds its tier).
+# =============================================================================
+
+sensor:
+  - platform: mqtt_subscribe
+    topic: ${mqtt_root}/${node_name}/sim/temperature
+    name: Greenhouse Temperature
+    id: greenhouse_temperature
+    unit_of_measurement: °C
+    device_class: temperature
+    accuracy_decimals: 1
+
+  - platform: mqtt_subscribe
+    topic: ${mqtt_root}/${node_name}/sim/humidity
+    name: Greenhouse Humidity
+    id: greenhouse_humidity
+    unit_of_measurement: "%"
+    device_class: humidity
+    accuracy_decimals: 0
+
+  - platform: mqtt_subscribe
+    topic: ${mqtt_root}/${node_name}/sim/soil
+    name: Soil Moisture
+    id: soil_moisture
+    unit_of_measurement: "%"
+    icon: mdi:water-percent
+    accuracy_decimals: 0
+
+  - platform: mqtt_subscribe
+    topic: ${mqtt_root}/${node_name}/sim/battery
+    name: Battery Voltage
+    id: battery_voltage
+    unit_of_measurement: V
+    device_class: voltage
+    accuracy_decimals: 2
+
+  - platform: mqtt_subscribe
+    topic: ${mqtt_root}/${node_name}/sim/illuminance
+    name: Greenhouse Illuminance
+    id: greenhouse_illuminance
+    unit_of_measurement: lx
+    device_class: illuminance
+    accuracy_decimals: 0
+
+  - platform: mqtt_subscribe
+    topic: ${mqtt_root}/${node_name}/sim/solar_current
+    name: Solar Current
+    id: solar_current
+    unit_of_measurement: A
+    device_class: current
+    accuracy_decimals: 2
+
+  # Derived exactly like a charge controller would see it — not injectable.
+  - platform: template
+    name: Solar Power
+    id: solar_power
+    unit_of_measurement: W
+    device_class: power
+    accuracy_decimals: 1
+    update_interval: 15s
+    lambda: |-
+      if (std::isnan(id(battery_voltage).state) ||
+          std::isnan(id(solar_current).state))
+        return NAN;
+      return id(battery_voltage).state * id(solar_current).state;

@@ -2,6 +2,7 @@
 esphome/secrets.yaml
 esphome/.esphome/
 .esphome/
+.esphome-sim/
 server/.env
 server/mosquitto/passwd
 
