@@ -25,6 +25,11 @@ the same C++ that runs in the greenhouse.
             YOUR broker ──► YOUR Home Assistant / Grafana
 ```
 
+The simulator engine (container build, web UI, QEMU glue) lives in the
+shared [esphome-skills](https://github.com/heavy-oil1462/esphome-skills)
+package; the frodas side is `tools/project.py` (injections, presets,
+node names) and `tools/test_sim.py` (rule assertions).
+
 ## Quickstart
 
 ```bash
@@ -95,7 +100,7 @@ asserts boot/discovery, injection round-trips, watering window open + hard
 close, ventilation opening, tier 2/3 escalation, and cascaded recovery.
 Requirements: an esphome that can compile (pip fallback if the nix
 platformio wrapper can't run its sandbox), `qemu-esp32` (in the `.#sim`
-devshell via the `nix-qemu-espressif` flake input — kept out of the default
+devshell via the `esphome-skills` flake input — kept out of the default
 shell because it may build QEMU from source once), and the ability to bind udp/123
 (root/CAP_NET_BIND_SERVICE) — lwIP's SNTP port is not configurable. Slow
 (a compile plus ~6 min of emulated control-loop time); deliberately not part

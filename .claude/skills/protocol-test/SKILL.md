@@ -5,35 +5,21 @@ description: Run the frodas MQTT protocol integration test (throwaway authentica
 
 # frodas protocol integration test
 
-Boots a throwaway authenticated mosquitto on an ephemeral port, runs the mock
-device against it, and asserts the contract in `docs/PROTOCOL.md`:
-
-1. retained availability (`status` = online)
-2. telemetry is numeric and retained (late subscriber gets it)
-3. number setpoint command → retained state echo
-4. enable-switch command → state echo
-5. SIGKILL → broker publishes LWT `offline`
-
-## Run
+Harness: esphome_skills.protocol_test. The frodas entities asserted are in
+tools/test_protocol.py: battery_voltage telemetry, watering_soil_threshold
+setpoint round trip, watering_enabled switch round trip, plus the shared
+availability and LWT steps.
 
 ```bash
 nix develop -c python3 tools/test_protocol.py
 ```
 
-Exit code 0 = pass. No Docker, no hardware, no network beyond localhost.
+Exit code 0 = pass. No Docker, no hardware. Part of the validation gate and
+CI.
 
-## When it fails
+Keep in sync: if the contract changes, change `docs/PROTOCOL.md`,
+`esphome/`, `tools/mock_device.py` and `tools/test_protocol.py` together.
+Setpoints use retained commands, raw actuators never do (replay hazard).
 
-- The mock device's own log is printed on failure — read it first.
-- `mosquitto up ...` failing: port clash is auto-avoided, so suspect the
-  mosquitto binary (are you in the devshell?).
-- LWT check is timing-sensitive (keepalive 2 s, allow ~15 s) — rerun once
-  before digging.
-
-## Important semantic note
-
-The ESPHome firmware and the mock intentionally publish state on
-`<prefix>/<component>/<object_id>/state` with `retain=true`, and HA discovery
-uses retained commands for setpoints ONLY (never raw actuator switches —
-replay hazard). If you change either side, change `docs/PROTOCOL.md`,
-`esphome/`, `tools/mock_device.py`, and this test together.
+Canonical doc and failure notes (mock log first, LWT timing):
+https://github.com/heavy-oil1462/esphome-skills/blob/main/skills/protocol-test.md

@@ -12,7 +12,7 @@
 #   python3 tools/sim_container.py build
 #   python3 tools/sim_container.py run --broker <your-mqtt-host>
 #
-# Inject sensor values and steer time-of-day from the web UI (sim/webui.py);
+# Inject sensor values and steer time-of-day from the web UI (esphome_skills.webui);
 # the watering / ventilation / load-shedding rules that react are the same
 # C++ compiled onto real nodes.
 #
