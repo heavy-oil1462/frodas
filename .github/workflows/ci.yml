@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Works on GitHub's ubuntu-latest and on self-hosted NixOS runners: the nix
+# installer only runs when nix is missing, and the user-namespace step is a
+# no-op where the apparmor knob does not exist. No magic-nix-cache: the
+# service was shut down in 2025; cache.nixos.org covers the devshell.
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check for nix
+        id: nix
+        run: |
+          echo "present=$(command -v nix >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - uses: DeterminateSystems/nix-installer-action@v16
+        if: steps.nix.outputs.present == 'false'
+      - name: validation gate
+        run: nix develop -c python3 tools/validate.py
+      - name: protocol integration test
+        run: nix develop -c python3 tools/test_protocol.py
+
+  firmware-build:
+    # Full C++ firmware build. Slow: nix supplies esphome, but platformio
+    # still downloads the xtensa toolchain on a cold cache.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check for nix
+        id: nix
+        run: |
+          echo "present=$(command -v nix >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - uses: DeterminateSystems/nix-installer-action@v16
+        if: steps.nix.outputs.present == 'false'
+      - name: allow unprivileged user namespaces
+        # Ubuntu 24.04 (ubuntu-latest) blocks them via apparmor, which
+        # breaks the bubblewrap sandbox in nixpkgs' platformio wrapper
+        # during `esphome compile`. Absent knob (NixOS runners) = no-op.
+        run: |
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: cache platformio
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('esphome/greenhouse-base.yaml') }}
+          restore-keys: pio-${{ runner.os }}-
+      - name: compile firmware
+        run: |
+          cp esphome/secrets.yaml.example esphome/secrets.yaml
+          nix develop -c esphome compile esphome/example-greenhouse.yaml
+      - name: compile sim firmware (QEMU target)
+        run: nix develop -c esphome compile esphome/sim-greenhouse.yaml
+        # The full rule-level test (tools/test_sim.py) stays a local tool:
+        # it needs Espressif QEMU (a ~20 min source build without a
+        # populated nix cache) and udp/123. See docs/SIMULATION.md.
