@@ -1,0 +1,44 @@
+# Park: belongs at .github/workflows/ci.yml; the agent push token lacks
+# the workflow scope. Move it there when merging (web UI or a scoped push).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+      - name: validation gate
+        run: nix develop -c python3 tools/validate.py
+      - name: protocol integration test
+        run: nix develop -c python3 tools/test_protocol.py
+
+  firmware-build:
+    # Full C++ firmware build. Slow: nix supplies esphome, but platformio
+    # still downloads the xtensa toolchain on a cold cache.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+      - name: cache platformio
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('esphome/greenhouse-base.yaml') }}
+          restore-keys: pio-${{ runner.os }}-
+      - name: compile firmware
+        run: |
+          cp esphome/secrets.yaml.example esphome/secrets.yaml
+          nix develop -c esphome compile esphome/example-greenhouse.yaml
+      - name: compile sim firmware (QEMU target)
+        run: nix develop -c esphome compile esphome/sim-greenhouse.yaml
+        # The full rule-level test (tools/test_sim.py) stays a local tool for
+        # now: it needs Espressif QEMU (a ~20 min source build without a
+        # populated nix cache) and udp/123. See docs/SIMULATION.md.
