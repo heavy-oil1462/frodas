@@ -105,11 +105,10 @@ notes in the package header. Example Lovelace: `homeassistant/dashboards/`.
 esphome/                 firmware: greenhouse-base.yaml + composable packages/
 server/                  docker compose: mosquitto, telegraf, VictoriaMetrics, grafana
 homeassistant/           HA package, alert blueprint, lovelace example
-sim/                     real-firmware simulator: Containerfile, web UI, QEMU glue
 docs/                    PROTOCOL.md · EXTENDING.md · HARDWARE.md · SIMULATION.md
-tools/                   validate.py · stack.py · mock_device.py · sim_container.py
-                         test_protocol.py · test_sim.py
-.claude/skills/          agent skills wrapping the tools (validate, simulator, …)
+tools/                   project.py · validate.py · stack.py · mock_device.py
+                         sim_container.py · test_protocol.py · test_sim.py
+.claude/skills/          agent skills wrapping the tools (verify, simulator, …)
 ```
 
 The MQTT contract (topics, retention rules, availability semantics, the
