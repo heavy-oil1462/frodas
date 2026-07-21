@@ -214,8 +214,16 @@ script:
             if (!std::isnan(n->state)) n->publish_state(n->state);
           #endif
           #ifdef USE_SELECT
-          for (auto *sel : App.get_selects())
+          for (auto *sel : App.get_selects()) {
+          // 2026.7 replaced the public Select::state member with
+          // current_option(); keep compiling on both sides of the change
+          #if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 7, 0)
+            if (!sel->current_option().empty())
+              sel->publish_state(sel->current_option().str());
+          #else
             if (!sel->state.empty()) sel->publish_state(sel->state);
+          #endif
+          }
           #endif
           #ifdef USE_COVER
           for (auto *c : App.get_covers())

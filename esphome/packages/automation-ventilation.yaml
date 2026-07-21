@@ -140,7 +140,13 @@ interval:
             }
           };
 
+          // 2026.7 replaced the public Select::state member with
+          // current_option(); keep compiling on both sides of the change
+          #if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 7, 0)
+          const std::string mode = id(vent_mode).current_option().str();
+          #else
           const std::string mode = id(vent_mode).state;
+          #endif
           if (mode == "Force open") {
             open_vent();
             return;
