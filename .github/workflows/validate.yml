@@ -1,0 +1,26 @@
+# The software gate. Cheap and broad (yaml, esphome config, compose and
+# server-stack contracts, sim contract, python), so it runs on every
+# change, followed by the MQTT protocol test against a throwaway broker.
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install gate toolchain
+        run: pip install -r requirements.txt
+      - name: install mosquitto (protocol test broker)
+        run: sudo apt-get update && sudo apt-get install -y mosquitto
+      - name: validation gate
+        run: python3 tools/validate.py
+      - name: protocol integration test
+        run: python3 tools/test_protocol.py

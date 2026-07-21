@@ -22,7 +22,9 @@ MQTT/VictoriaMetrics/Grafana server + Home Assistant integration.
 - Prefer the reusable tools in `tools/` over ad-hoc shell; extend a tool if
   something is missing, then document it in the matching skill.
 - Everything must stay green: `nix develop -c python3 tools/validate.py` and
-  `nix develop -c python3 tools/test_protocol.py`. CI runs both.
+  `nix develop -c python3 tools/test_protocol.py`. CI runs both without nix
+  (pip toolchain from requirements.txt); the devshell stays the pinned
+  reference.
 - Full firmware build (`esphome compile`) after touching any lambda —
   `esphome config` does not catch C++ errors.
 - Entity naming: object_ids derive from entity names; they are load-bearing
