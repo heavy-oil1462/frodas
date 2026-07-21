@@ -133,6 +133,10 @@ sudo -E nix develop .#sim -c python3 tools/test_sim.py  # REAL firmware under QE
 esphome compile esphome/example-greenhouse.yaml # full firmware build
 ```
 
+No nix? `pip install -r requirements.txt` provides the same gate toolchain
+(plus `mosquitto` from your package manager for the protocol test); CI uses
+this path. The devshell stays the pinned reference.
+
 NixOS notes: the flake pins everything the repo needs (`nix develop`).
 On NixOS hosts the server stack runs fine with `virtualisation.docker.enable
 = true` (or rewrite `server/docker-compose.yml` as `virtualisation.oci-containers`

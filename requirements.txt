@@ -1,0 +1,15 @@
+# The no-nix toolchain for the software gate (tools/validate.py) and
+# the protocol test (tools/test_protocol.py). The nix devshell
+# (flake.nix) provides the same tools and stays the pinned reference;
+# either works.
+#
+#     pip install -r requirements.txt
+#
+# test_protocol.py additionally needs the mosquitto broker binaries
+# (mosquitto, mosquitto_passwd) on PATH: apt install mosquitto. The
+# compose check needs a docker compose CLI.
+esphome-skills @ git+https://github.com/heavy-oil1462/esphome-skills
+esphome>=2025.5
+yamllint>=1.35
+paho-mqtt>=1.6
+pyyaml>=6.0

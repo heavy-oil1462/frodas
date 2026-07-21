@@ -1,0 +1,53 @@
+# Full C++ firmware build. The heavy job, so it triggers only when the
+# firmware or its toolchain can have changed; the validate workflow
+# still checks the config on every change.
+name: firmware
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "esphome/**"
+      - "requirements.txt"
+      - ".github/workflows/firmware.yml"
+  pull_request:
+    paths:
+      - "esphome/**"
+      - "requirements.txt"
+      - ".github/workflows/firmware.yml"
+
+jobs:
+  firmware-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install esphome
+        run: pip install -r requirements.txt
+      - name: cache platformio
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('esphome/*-base.yaml') }}
+          restore-keys: pio-${{ runner.os }}-
+      - name: cache esphome build tree
+        # the framework compile dominates the job; with the build dir
+        # restored, ninja rebuilds only what the repo's yaml regenerates
+        uses: actions/cache@v4
+        with:
+          path: |
+            esphome/.esphome
+            ~/.cache/esphome
+          key: esphome-build-${{ runner.os }}-${{ hashFiles('requirements.txt', 'esphome/**/*.yaml') }}
+          restore-keys: esphome-build-${{ runner.os }}-
+      - name: compile firmware
+        run: |
+          cp esphome/secrets.yaml.example esphome/secrets.yaml
+          esphome compile esphome/example-greenhouse.yaml
+      - name: compile sim firmware (QEMU target)
+        run: esphome compile esphome/sim-greenhouse.yaml
+        # The full rule-level test (tools/test_sim.py) stays a local tool:
+        # it needs Espressif QEMU (a ~20 min source build without a
+        # populated nix cache) and udp/123. See docs/SIMULATION.md.
